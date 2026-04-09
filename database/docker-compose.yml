@@ -1,0 +1,23 @@
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: personal_finance
+      MYSQL_INITDB_SKIP_TZINFO: "1"
+    ports:
+      - "3306:3306"
+    volumes:
+      - pf_mysql_data:/var/lib/mysql
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+
+volumes:
+  pf_mysql_data:
