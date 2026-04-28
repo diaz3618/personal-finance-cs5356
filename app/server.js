@@ -23,11 +23,49 @@ app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:3010' }));
 app.use(clerkMiddleware());
 
 // webhookHandler defined below — registered here so express.raw() runs before express.json()
-const webhookHandler = (req, res) => res.status(501).json({ error: 'Not implemented' });
+const webhookHandler = async (req, res) => {
+  const wh = new Webhook(process.env.CLERK_WEBHOOK_SECRET);
+  let evt;
+  try {
+    evt = wh.verify(req.body, {
+      'svix-id':        req.headers['svix-id'],
+      'svix-timestamp': req.headers['svix-timestamp'],
+      'svix-signature': req.headers['svix-signature'],
+    });
+  } catch {
+    return res.status(400).json({ error: 'Invalid signature' });
+  }
+
+  if (evt.type === 'user.created') {
+    const { id, email_addresses, first_name, last_name } = evt.data;
+    const email = email_addresses?.[0]?.email_address ?? null;
+    const display_name = [first_name, last_name].filter(Boolean).join(' ') || null;
+    await pool.execute(
+      `INSERT INTO users (clerk_user_id, email, display_name)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE email = VALUES(email), display_name = VALUES(display_name)`,
+      [id, email, display_name]
+    );
+  }
+
+  if (evt.type === 'user.deleted') {
+    await pool.execute(
+      'DELETE FROM users WHERE clerk_user_id = ?',
+      [evt.data.id]
+    );
+  }
+
+  res.json({ received: true });
+};
 app.post('/api/webhooks/clerk', express.raw({ type: 'application/json' }), webhookHandler);
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+app.get('/config.js', (req, res) => {
+  res.type('application/javascript');
+  res.send(`window.CLERK_PK = ${JSON.stringify(process.env.CLERK_PUBLISHABLE_KEY)};`);
+});
 
 const checkAuth = (req, res, next) => {
   const { userId } = getAuth(req);
@@ -68,6 +106,22 @@ const resolveDbUser = async (req, res, next) => {
 };
 
 app.use('/api', checkAuth, resolveDbUser);
+
+app.get('/api/auth/me', async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT id, clerk_user_id, email, display_name, created_at FROM users WHERE id = ?',
+      [req.userId]
+    );
+    if (!rows.length) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load user.' });
+  }
+});
 
 // --- Categories -------------------------------------------------------------
 
