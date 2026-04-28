@@ -1,15 +1,47 @@
+let clerk = null;
+
+async function initClerk() {
+  await new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = '/config.js';
+    s.onload = res;
+    s.onerror = () => rej(new Error('Failed to load /config.js'));
+    document.head.appendChild(s);
+  });
+  const pk = window.CLERK_PK;
+  const domain = atob(pk.split('_')[2]).slice(0, -1);
+  await new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = `https://${domain}/npm/@clerk/ui@1/dist/ui.browser.js`;
+    s.crossOrigin = 'anonymous';
+    s.onload = res;
+    s.onerror = () => rej(new Error('Clerk bundle failed to load'));
+    document.head.appendChild(s);
+  });
+  const c = new window.Clerk(pk);
+  await c.load({ ui: { ClerkUI: window.__internal_ClerkUICtor } });
+  return c;
+}
+
+async function authHeaders() {
+  const token = await clerk.session.getToken();
+  return { Authorization: `Bearer ${token}` };
+}
+
 const api = {
   async get(path) {
-    const res = await fetch(path);
+    const res = await fetch(path, { headers: await authHeaders() });
+    if (res.status === 401) { location.href = '/login.html'; return; }
     if (!res.ok) throw new Error(await readError(res));
     return res.json();
   },
   async post(path, body) {
     const res = await fetch(path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
       body: JSON.stringify(body),
     });
+    if (res.status === 401) { location.href = '/login.html'; return; }
     if (!res.ok) throw new Error(await readError(res));
     return res.json();
   },
@@ -43,7 +75,18 @@ const pages = {
   reports: initReports,
 };
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    clerk = await initClerk();
+  } catch (err) {
+    console.error('[auth] Clerk failed to initialize:', err);
+    location.href = '/login.html';
+    return;
+  }
+  if (!clerk.isSignedIn) {
+    location.href = '/login.html';
+    return;
+  }
   const page = document.body.dataset.page;
   const init = pages[page];
   if (init) init();
