@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign In — pf-tracker</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body data-page="login">
+  <main class="card">
+    <h1>Sign In</h1>
+    <div id="sign-in"></div>
+  </main>
+  <script src="/config.js"></script>
+  <script>
+    (async () => {
+      const pk = window.CLERK_PK;
+      const domain = atob(pk.split('_')[2]).slice(0, -1);
+      await new Promise((res, rej) => {
+        const s = document.createElement('script');
+        s.src = `https://${domain}/npm/@clerk/ui@1/dist/ui.browser.js`;
+        s.crossOrigin = 'anonymous';
+        s.onload = res;
+        s.onerror = () => rej(new Error('Clerk bundle failed to load'));
+        document.head.appendChild(s);
+      });
+      const clerk = new window.Clerk(pk);
+      await clerk.load({ ui: { ClerkUI: window.__internal_ClerkUICtor } });
+      if (clerk.isSignedIn) {
+        location.href = '/';
+        return;
+      }
+      clerk.mountSignIn(document.getElementById('sign-in'));
+    })();
+  </script>
+</body>
+</html>
