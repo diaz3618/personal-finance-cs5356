@@ -5,7 +5,7 @@ const express = require('express');
 const pool = require('./db');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 const USER_ID = 1;
 
 app.use(express.json());
@@ -16,10 +16,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/api/categories', async (req, res) => {
   try {
     const [rows] = await pool.execute(
-      `SELECT CategoryID, CategoryName, CategoryType
-         FROM Categories
-        WHERE UserID = ?
-        ORDER BY CategoryType, CategoryName`,
+      `SELECT id AS category_id, name AS category_name, type AS category_type
+         FROM categories
+        WHERE user_id = ?
+        ORDER BY type, name`,
       [USER_ID]
     );
     res.json(rows);
@@ -37,18 +37,54 @@ app.post('/api/categories', async (req, res) => {
 
   try {
     const [result] = await pool.execute(
-      `INSERT INTO Categories (UserID, CategoryName, CategoryType)
-       VALUES (?, ?, ?)`,
+      `INSERT INTO categories (user_id, name, type) VALUES (?, ?, ?)`,
       [USER_ID, name, type]
     );
     res.status(201).json({
-      CategoryID: result.insertId,
-      CategoryName: name,
-      CategoryType: type,
+      category_id: result.insertId,
+      category_name: name,
+      category_type: type,
     });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create category.' });
+  }
+});
+
+app.put('/api/categories/:id', async (req, res) => {
+  const { name, type } = req.body || {};
+  if (!name || !type) {
+    return res.status(400).json({ error: 'name and type are required.' });
+  }
+
+  try {
+    const [result] = await pool.execute(
+      `UPDATE categories SET name = ?, type = ? WHERE id = ? AND user_id = ?`,
+      [name, type, req.params.id, USER_ID]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Category not found.' });
+    }
+    res.json({ category_id: Number(req.params.id), category_name: name, category_type: type });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update category.' });
+  }
+});
+
+app.delete('/api/categories/:id', async (req, res) => {
+  try {
+    const [result] = await pool.execute(
+      `DELETE FROM categories WHERE id = ? AND user_id = ?`,
+      [req.params.id, USER_ID]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Category not found.' });
+    }
+    res.status(204).send();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete category.' });
   }
 });
 
@@ -57,12 +93,12 @@ app.post('/api/categories', async (req, res) => {
 app.get('/api/transactions', async (req, res) => {
   try {
     const [rows] = await pool.execute(
-      `SELECT t.TransactionID, t.Amount, t.TransactionDate, t.TransactionType,
-              t.Description, t.CategoryID, c.CategoryName
-         FROM Transactions t
-         JOIN Categories  c ON c.CategoryID = t.CategoryID
-        WHERE t.UserID = ?
-        ORDER BY t.TransactionDate DESC, t.TransactionID DESC`,
+      `SELECT t.id AS transaction_id, t.amount, t.transaction_date, t.transaction_type,
+              t.notes, t.category_id, c.name AS category_name
+         FROM transactions t
+         JOIN categories   c ON c.id = t.category_id
+        WHERE t.user_id = ?
+        ORDER BY t.transaction_date DESC, t.id DESC`,
       [USER_ID]
     );
     res.json(rows);
@@ -73,7 +109,7 @@ app.get('/api/transactions', async (req, res) => {
 });
 
 app.post('/api/transactions', async (req, res) => {
-  const { amount, date, type, categoryId, description } = req.body || {};
+  const { amount, date, type, categoryId, notes } = req.body || {};
 
   if (amount == null || !date || !type || !categoryId) {
     return res.status(400).json({
@@ -83,15 +119,58 @@ app.post('/api/transactions', async (req, res) => {
 
   try {
     const [result] = await pool.execute(
-      `INSERT INTO Transactions
-         (UserID, CategoryID, Amount, TransactionDate, TransactionType, Description)
+      `INSERT INTO transactions
+         (user_id, category_id, amount, transaction_date, transaction_type, notes)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [USER_ID, categoryId, amount, date, type, description || null]
+      [USER_ID, categoryId, amount, date, type, notes || null]
     );
-    res.status(201).json({ TransactionID: result.insertId });
+    res.status(201).json({ transaction_id: result.insertId });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create transaction.' });
+  }
+});
+
+app.put('/api/transactions/:id', async (req, res) => {
+  const { amount, date, type, categoryId, notes } = req.body || {};
+
+  if (amount == null || !date || !type || !categoryId) {
+    return res.status(400).json({
+      error: 'amount, date, type, and categoryId are required.',
+    });
+  }
+
+  try {
+    const [result] = await pool.execute(
+      `UPDATE transactions
+          SET amount = ?, transaction_date = ?, transaction_type = ?,
+              category_id = ?, notes = ?
+        WHERE id = ? AND user_id = ?`,
+      [amount, date, type, categoryId, notes || null, req.params.id, USER_ID]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Transaction not found.' });
+    }
+    res.json({ transaction_id: Number(req.params.id) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update transaction.' });
+  }
+});
+
+app.delete('/api/transactions/:id', async (req, res) => {
+  try {
+    const [result] = await pool.execute(
+      `DELETE FROM transactions WHERE id = ? AND user_id = ?`,
+      [req.params.id, USER_ID]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Transaction not found.' });
+    }
+    res.status(204).send();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete transaction.' });
   }
 });
 
@@ -100,13 +179,13 @@ app.post('/api/transactions', async (req, res) => {
 app.get('/api/reports/monthly', async (req, res) => {
   try {
     const [rows] = await pool.execute(
-      `SELECT DATE_FORMAT(TransactionDate, '%Y-%m') AS Month,
-              TransactionType,
-              SUM(Amount) AS Total
-         FROM Transactions
-        WHERE UserID = ?
-        GROUP BY Month, TransactionType
-        ORDER BY Month DESC, TransactionType`,
+      `SELECT DATE_FORMAT(transaction_date, '%Y-%m') AS month,
+              transaction_type,
+              SUM(amount) AS total
+         FROM transactions
+        WHERE user_id = ?
+        GROUP BY month, transaction_type
+        ORDER BY month DESC, transaction_type`,
       [USER_ID]
     );
     res.json(rows);
@@ -119,12 +198,12 @@ app.get('/api/reports/monthly', async (req, res) => {
 app.get('/api/reports/by-category', async (req, res) => {
   try {
     const [rows] = await pool.execute(
-      `SELECT c.CategoryName, c.CategoryType, SUM(t.Amount) AS Total
-         FROM Transactions t
-         JOIN Categories  c ON c.CategoryID = t.CategoryID
-        WHERE t.UserID = ?
-        GROUP BY c.CategoryID
-        ORDER BY Total DESC`,
+      `SELECT c.name AS category_name, c.type AS category_type, SUM(t.amount) AS total
+         FROM transactions t
+         JOIN categories   c ON c.id = t.category_id
+        WHERE t.user_id = ?
+        GROUP BY c.id
+        ORDER BY total DESC`,
       [USER_ID]
     );
     res.json(rows);
@@ -135,5 +214,5 @@ app.get('/api/reports/by-category', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Finance tracker listening on http://localhost:${PORT}`);
+  console.log(`pf-tracker listening on http://localhost:${PORT}`);
 });
