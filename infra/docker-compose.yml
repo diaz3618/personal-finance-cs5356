@@ -4,8 +4,6 @@ services:
     restart: unless-stopped
     env_file: ../.env
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: personal_finance
       MYSQL_INITDB_SKIP_TZINFO: "1"
     ports:
       - "3306:3306"
