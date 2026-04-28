@@ -10,12 +10,16 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-['CLERK_SECRET_KEY', 'CLERK_PUBLISHABLE_KEY', 'CLERK_WEBHOOK_SECRET'].forEach((key) => {
+['CLERK_SECRET_KEY', 'CLERK_PUBLISHABLE_KEY'].forEach((key) => {
   if (!process.env[key]) {
     console.error(`[startup] required env var ${key} is not set`);
     process.exit(1);
   }
 });
+
+if (!process.env.CLERK_WEBHOOK_SECRET) {
+  console.warn('[startup] CLERK_WEBHOOK_SECRET not set — webhook endpoint disabled');
+}
 
 
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:3010' }));
@@ -23,6 +27,9 @@ app.use(clerkMiddleware());
 
 // webhookHandler defined below — registered here so express.raw() runs before express.json()
 const webhookHandler = async (req, res) => {
+  if (!process.env.CLERK_WEBHOOK_SECRET) {
+    return res.status(503).json({ error: 'Webhook not configured' });
+  }
   const wh = new Webhook(process.env.CLERK_WEBHOOK_SECRET);
   let evt;
   try {
