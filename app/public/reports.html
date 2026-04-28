@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reports</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body data-page="reports">
+  <main class="card">
+    <h1>Reports</h1>
+
+    <section>
+      <h2>Select Report Type</h2>
+      <div class="report-buttons">
+        <button type="button" class="btn" data-report="monthly">Monthly Spending</button>
+        <button type="button" class="btn" data-report="by-category">Spending by Category</button>
+      </div>
+    </section>
+
+    <section id="report-results">
+      <h2>Results</h2>
+      <p class="muted" id="report-placeholder">Choose a report above to see results.</p>
+      <table id="report-table" hidden>
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <a class="btn btn-ghost" href="index.html">Back to Home</a>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>

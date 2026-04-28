@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Manage Categories</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body data-page="categories">
+  <main class="card">
+    <h1>Manage Categories</h1>
+
+    <section>
+      <h2>Existing Categories</h2>
+      <ul id="category-list" class="category-list">
+        <li class="muted">Loading…</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Add New Category</h2>
+      <form id="category-form" class="stack">
+        <label>
+          Name
+          <input type="text" id="category-name" name="name" maxlength="50" required />
+        </label>
+
+        <label>
+          Type
+          <select id="category-type" name="type" required>
+            <option value="Expense">Expense</option>
+            <option value="Income">Income</option>
+          </select>
+        </label>
+
+        <button type="submit" class="btn">Add Category</button>
+      </form>
+
+      <p id="form-status" class="status" role="status" aria-live="polite"></p>
+    </section>
+
+    <a class="btn btn-ghost" href="index.html">Back to Home</a>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>
