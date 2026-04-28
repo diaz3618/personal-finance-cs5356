@@ -3,8 +3,8 @@
 CREATE TABLE users (
     id              INT             NOT NULL AUTO_INCREMENT,
     clerk_user_id   VARCHAR(255)    NULL,
-    email           VARCHAR(255)    NOT NULL,
-    display_name    VARCHAR(100)    NOT NULL,
+    email           VARCHAR(255)    NULL,
+    display_name    VARCHAR(100)    NULL,
     created_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     PRIMARY KEY (id),
