@@ -3,13 +3,71 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const pool = require('./db');
+const { clerkMiddleware, getAuth } = require('@clerk/express');
+const { Webhook } = require('svix');
+const cors = require('cors');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+['CLERK_SECRET_KEY', 'CLERK_PUBLISHABLE_KEY', 'CLERK_WEBHOOK_SECRET'].forEach((key) => {
+  if (!process.env[key]) {
+    console.error(`[startup] required env var ${key} is not set`);
+    process.exit(1);
+  }
+});
+
 const USER_ID = 1;
+
+app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:3010' }));
+app.use(clerkMiddleware());
+
+// webhookHandler defined below — registered here so express.raw() runs before express.json()
+const webhookHandler = (req, res) => res.status(501).json({ error: 'Not implemented' });
+app.post('/api/webhooks/clerk', express.raw({ type: 'application/json' }), webhookHandler);
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+const checkAuth = (req, res, next) => {
+  const { userId } = getAuth(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  next();
+};
+
+const resolveDbUser = async (req, res, next) => {
+  try {
+    const { userId: clerkUserId } = getAuth(req);
+    const [rows] = await pool.execute(
+      'SELECT id FROM users WHERE clerk_user_id = ?',
+      [clerkUserId]
+    );
+    if (!rows.length) {
+      console.warn(`[auth] JIT provision for clerk_user_id ${clerkUserId}`);
+      const [ins] = await pool.execute(
+        'INSERT IGNORE INTO users (clerk_user_id) VALUES (?)',
+        [clerkUserId]
+      );
+      const insertedId = ins.insertId || null;
+      if (!insertedId) {
+        const [retry] = await pool.execute(
+          'SELECT id FROM users WHERE clerk_user_id = ?',
+          [clerkUserId]
+        );
+        req.userId = retry[0].id;
+      } else {
+        req.userId = insertedId;
+      }
+    } else {
+      req.userId = rows[0].id;
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
+};
+
+app.use('/api', checkAuth, resolveDbUser);
 
 // --- Categories -------------------------------------------------------------
 
