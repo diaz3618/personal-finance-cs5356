@@ -1,80 +1,86 @@
-# Personal Expense Tracker
+# pf-tracker
 
-Small web app for recording personal income and expenses, backed by a MySQL database. Lets you add categorized transactions and view monthly / by-category spending reports.
+Personal finance tracker — records income and expense transactions by category, with monthly and by-category reports.
 
-**Stack:** HTML/CSS/JS frontend · Node.js + Express backend · MySQL
+**Stack:** HTML/CSS/JS frontend · Node.js + Express · MySQL 8.0 · Clerk authentication
 
 ## Prerequisites
 
-Install these once on your machine:
-
-- [Node.js](https://nodejs.org/) (v18 or newer)
-- [MySQL Server + Workbench](https://dev.mysql.com/downloads/installer/)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine + Compose
+- A [Clerk](https://clerk.com) account with a new application created
 
 ## Setup
 
-From inside the `finance-tracker/` folder:
+### 1. Configure environment variables
 
-### 1. Install dependencies
+From the project root (not this directory):
 
 ```bash
+cp .env.example .env
+```
+
+Fill in the four Clerk values in `.env`:
+
+| Variable | Where to find it |
+|----------|-----------------|
+| `CLERK_PUBLISHABLE_KEY` | Clerk Dashboard → API Keys |
+| `CLERK_SECRET_KEY` | Clerk Dashboard → API Keys |
+| `CLERK_WEBHOOK_SECRET` | Clerk Dashboard → Webhooks → your endpoint → Signing Secret |
+| `FRONTEND_URL` | Leave as `http://localhost:3010` for local dev |
+
+### 2. Register the webhook endpoint in Clerk
+
+In the Clerk Dashboard, go to **Webhooks → Add Endpoint**:
+
+- URL: `https://your-tunnel-or-domain/api/webhooks/clerk`
+- Subscribe to events: `user.created`, `user.deleted`
+- Copy the **Signing Secret** into `CLERK_WEBHOOK_SECRET` in your `.env`
+
+For local development, use [ngrok](https://ngrok.com) or [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) to expose port 3010.
+
+### 3. Start the stack
+
+```bash
+docker compose -f infra/docker-compose.yml up -d
+```
+
+The app is available at [http://localhost:3010](http://localhost:3010).
+
+### 4. Rebuilding after schema changes
+
+If `database/init/01-schema.sql` changes, the MySQL volume must be destroyed and recreated:
+
+```bash
+docker compose -f infra/docker-compose.yml down -v
+docker compose -f infra/docker-compose.yml up -d
+```
+
+This erases all data. Re-seed by re-running `database/init/02-seed.sql` via the MySQL client or a volume init script.
+
+## Development
+
+Run the app directly (requires local MySQL):
+
+```bash
+cd app
 npm install
+node server.js
 ```
 
-### 2. Configure your MySQL credentials
+## Routes
 
-Copy the example env file and fill in your MySQL password:
-
-```bash
-copy .env.example .env
-```
-
-Then open `.env` and set `DB_PASSWORD` to your MySQL root password. The other defaults (`localhost`, port `3306`, user `root`, database `finance_tracker`) work as-is for a standard local MySQL install.
-
-### 3. Create the database
-
-Open MySQL Workbench, then:
-
-1. `File → Open SQL Script…` and select `schema.sql`
-2. Click the lightning bolt (⚡) to execute the whole script
-
-This creates the `finance_tracker` schema, all three tables (`Users`, `Categories`, `Transactions`), and seeds a default user, four categories, and a handful of sample transactions.
-
-> **Note:** Re-running `schema.sql` drops and recreates the tables — it wipes any data you've added.
-
-## Run the app
-
-```bash
-npm start
-```
-
-Open <http://localhost:3000> in your browser. You should see the Home page with three buttons: **Add Transaction**, **Manage Categories**, **View Reports**.
-
-Stop the server with `Ctrl+C`.
-
-## Project structure
-
-```
-finance-tracker/
-├── server.js        # Express app + REST API
-├── db.js            # MySQL connection pool
-├── schema.sql       # database setup (run once in Workbench)
-├── .env.example     # template env file (commit this)
-├── .env             # your local secrets (gitignored)
-└── public/
-    ├── index.html
-    ├── add-transaction.html
-    ├── categories.html
-    ├── reports.html
-    ├── style.css
-    └── script.js
-```
-
-## Troubleshooting
-
-| Symptom | Likely cause |
-|---|---|
-| `Access denied for user 'root'` in terminal | Wrong password in `.env` |
-| `Unknown database 'finance_tracker'` | `schema.sql` wasn't run, or `DB_NAME` doesn't match |
-| `ECONNREFUSED 127.0.0.1:3306` | MySQL Server isn't running — check `services.msc` for `MySQL80` |
-| Page loads but data is empty / red errors | Check browser DevTools → Network tab for the failing `/api/...` request |
+| Method | Path | Auth required |
+|--------|------|---------------|
+| GET | `/api/categories` | Yes |
+| POST | `/api/categories` | Yes |
+| PUT | `/api/categories/:id` | Yes |
+| DELETE | `/api/categories/:id` | Yes |
+| GET | `/api/transactions` | Yes |
+| POST | `/api/transactions` | Yes |
+| PUT | `/api/transactions/:id` | Yes |
+| DELETE | `/api/transactions/:id` | Yes |
+| GET | `/api/reports/monthly` | Yes |
+| GET | `/api/reports/by-category` | Yes |
+| GET | `/api/auth/me` | Yes |
+| POST | `/api/webhooks/clerk` | Svix signature |
+| GET | `/config.js` | No |
