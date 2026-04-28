@@ -20,5 +20,17 @@ services:
       retries: 30
       start_period: 120s
 
+  app:
+    build: ../app
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      DB_HOST: mysql
+    ports:
+      - "3000:3000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
 volumes:
   pf_mysql_data:
