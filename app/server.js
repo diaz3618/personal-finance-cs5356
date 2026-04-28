@@ -17,7 +17,6 @@ const PORT = process.env.PORT || 3000;
   }
 });
 
-const USER_ID = 1;
 
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:3010' }));
 app.use(clerkMiddleware());
@@ -132,7 +131,7 @@ app.get('/api/categories', async (req, res) => {
          FROM categories
         WHERE user_id = ?
         ORDER BY type, name`,
-      [USER_ID]
+      [req.userId]
     );
     res.json(rows);
   } catch (err) {
@@ -150,7 +149,7 @@ app.post('/api/categories', async (req, res) => {
   try {
     const [result] = await pool.execute(
       `INSERT INTO categories (user_id, name, type) VALUES (?, ?, ?)`,
-      [USER_ID, name, type]
+      [req.userId, name, type]
     );
     res.status(201).json({
       category_id: result.insertId,
@@ -172,7 +171,7 @@ app.put('/api/categories/:id', async (req, res) => {
   try {
     const [result] = await pool.execute(
       `UPDATE categories SET name = ?, type = ? WHERE id = ? AND user_id = ?`,
-      [name, type, req.params.id, USER_ID]
+      [name, type, req.params.id, req.userId]
     );
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Category not found.' });
@@ -188,7 +187,7 @@ app.delete('/api/categories/:id', async (req, res) => {
   try {
     const [result] = await pool.execute(
       `DELETE FROM categories WHERE id = ? AND user_id = ?`,
-      [req.params.id, USER_ID]
+      [req.params.id, req.userId]
     );
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Category not found.' });
@@ -211,7 +210,7 @@ app.get('/api/transactions', async (req, res) => {
          JOIN categories   c ON c.id = t.category_id
         WHERE t.user_id = ?
         ORDER BY t.transaction_date DESC, t.id DESC`,
-      [USER_ID]
+      [req.userId]
     );
     res.json(rows);
   } catch (err) {
@@ -234,7 +233,7 @@ app.post('/api/transactions', async (req, res) => {
       `INSERT INTO transactions
          (user_id, category_id, amount, transaction_date, transaction_type, notes)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [USER_ID, categoryId, amount, date, type, notes || null]
+      [req.userId, categoryId, amount, date, type, notes || null]
     );
     res.status(201).json({ transaction_id: result.insertId });
   } catch (err) {
@@ -258,7 +257,7 @@ app.put('/api/transactions/:id', async (req, res) => {
           SET amount = ?, transaction_date = ?, transaction_type = ?,
               category_id = ?, notes = ?
         WHERE id = ? AND user_id = ?`,
-      [amount, date, type, categoryId, notes || null, req.params.id, USER_ID]
+      [amount, date, type, categoryId, notes || null, req.params.id, req.userId]
     );
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Transaction not found.' });
@@ -274,7 +273,7 @@ app.delete('/api/transactions/:id', async (req, res) => {
   try {
     const [result] = await pool.execute(
       `DELETE FROM transactions WHERE id = ? AND user_id = ?`,
-      [req.params.id, USER_ID]
+      [req.params.id, req.userId]
     );
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Transaction not found.' });
@@ -298,7 +297,7 @@ app.get('/api/reports/monthly', async (req, res) => {
         WHERE user_id = ?
         GROUP BY month, transaction_type
         ORDER BY month DESC, transaction_type`,
-      [USER_ID]
+      [req.userId]
     );
     res.json(rows);
   } catch (err) {
@@ -316,7 +315,7 @@ app.get('/api/reports/by-category', async (req, res) => {
         WHERE t.user_id = ?
         GROUP BY c.id
         ORDER BY total DESC`,
-      [USER_ID]
+      [req.userId]
     );
     res.json(rows);
   } catch (err) {
