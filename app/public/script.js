@@ -20,7 +20,6 @@ async function initClerk() {
     document.head.appendChild(s);
   });
   await window.Clerk.load();
-  console.log('[auth] Clerk loaded. isSignedIn:', window.Clerk.isSignedIn, 'session:', !!window.Clerk.session);
   return window.Clerk;
 }
 
@@ -84,9 +83,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     location.href = '/login.html';
     return;
   }
-  console.log('[auth] after initClerk: isSignedIn=', clerk.isSignedIn, 'session=', !!clerk.session, 'user=', clerk.user?.id);
   if (!clerk.session) {
-    console.warn('[auth] no session, redirecting to login');
     location.href = '/login.html';
     return;
   }
