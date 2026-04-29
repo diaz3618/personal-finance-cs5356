@@ -23,7 +23,6 @@ if (!process.env.CLERK_WEBHOOK_SECRET) {
 
 
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:3010' }));
-app.use(clerkMiddleware());
 
 // webhookHandler defined below — registered here so express.raw() runs before express.json()
 const webhookHandler = async (req, res) => {
@@ -127,7 +126,7 @@ const setUserConn = async (req, res, next) => {
   }
 };
 
-app.use('/api', checkAuth, resolveDbUser, setUserConn);
+app.use('/api', clerkMiddleware(), checkAuth, resolveDbUser, setUserConn);
 
 app.get('/api/auth/me', async (req, res) => {
   try {
