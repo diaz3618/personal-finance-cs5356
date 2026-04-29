@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const path = require('path');
 const express = require('express');
-const pool = require('./db');
+const { adminPool, appPool } = require('./db');
 const { clerkMiddleware, getAuth } = require('@clerk/express');
 const { Webhook } = require('svix');
 const cors = require('cors');
@@ -46,7 +46,7 @@ const webhookHandler = async (req, res) => {
     const { id, email_addresses, first_name, last_name } = evt.data;
     const email = email_addresses?.[0]?.email_address ?? null;
     const display_name = [first_name, last_name].filter(Boolean).join(' ') || null;
-    await pool.execute(
+    await adminPool.execute(
       `INSERT INTO users (clerk_user_id, email, display_name)
        VALUES (?, ?, ?)
        ON DUPLICATE KEY UPDATE email = VALUES(email), display_name = VALUES(display_name)`,
@@ -55,7 +55,7 @@ const webhookHandler = async (req, res) => {
   }
 
   if (evt.type === 'user.deleted') {
-    await pool.execute(
+    await adminPool.execute(
       'DELETE FROM users WHERE clerk_user_id = ?',
       [evt.data.id]
     );
@@ -82,19 +82,19 @@ const checkAuth = (req, res, next) => {
 const resolveDbUser = async (req, res, next) => {
   try {
     const { userId: clerkUserId } = getAuth(req);
-    const [rows] = await pool.execute(
+    const [rows] = await adminPool.execute(
       'SELECT id FROM users WHERE clerk_user_id = ?',
       [clerkUserId]
     );
     if (!rows.length) {
       console.warn(`[auth] JIT provision for clerk_user_id ${clerkUserId}`);
-      const [ins] = await pool.execute(
+      const [ins] = await adminPool.execute(
         'INSERT IGNORE INTO users (clerk_user_id) VALUES (?)',
         [clerkUserId]
       );
       const insertedId = ins.insertId || null;
       if (!insertedId) {
-        const [retry] = await pool.execute(
+        const [retry] = await adminPool.execute(
           'SELECT id FROM users WHERE clerk_user_id = ?',
           [clerkUserId]
         );
@@ -111,11 +111,27 @@ const resolveDbUser = async (req, res, next) => {
   }
 };
 
-app.use('/api', checkAuth, resolveDbUser);
+const setUserConn = async (req, res, next) => {
+  let conn;
+  try {
+    conn = await appPool.getConnection();
+    await conn.execute('SET @current_user_id = ?', [req.userId]);
+    req.conn = conn;
+    const release = () => { if (conn) { conn.release(); conn = null; } };
+    res.on('finish', release);
+    res.on('close',  release);
+    next();
+  } catch (err) {
+    if (conn) conn.release();
+    next(err);
+  }
+};
+
+app.use('/api', checkAuth, resolveDbUser, setUserConn);
 
 app.get('/api/auth/me', async (req, res) => {
   try {
-    const [rows] = await pool.execute(
+    const [rows] = await adminPool.execute(
       'SELECT id, clerk_user_id, email, display_name, created_at FROM users WHERE id = ?',
       [req.userId]
     );
@@ -133,12 +149,11 @@ app.get('/api/auth/me', async (req, res) => {
 
 app.get('/api/categories', async (req, res) => {
   try {
-    const [rows] = await pool.execute(
+    const [rows] = await req.conn.execute(
       `SELECT id AS category_id, name AS category_name, type AS category_type
-         FROM categories
-        WHERE user_id = ?
+         FROM v_user_categories
         ORDER BY type, name`,
-      [req.userId]
+      []
     );
     res.json(rows);
   } catch (err) {
@@ -154,8 +169,8 @@ app.post('/api/categories', async (req, res) => {
   }
 
   try {
-    const [result] = await pool.execute(
-      `INSERT INTO categories (user_id, name, type) VALUES (?, ?, ?)`,
+    const [result] = await req.conn.execute(
+      `INSERT INTO v_user_categories (user_id, name, type) VALUES (?, ?, ?)`,
       [req.userId, name, type]
     );
     res.status(201).json({
@@ -176,8 +191,8 @@ app.put('/api/categories/:id', async (req, res) => {
   }
 
   try {
-    const [result] = await pool.execute(
-      `UPDATE categories SET name = ?, type = ? WHERE id = ? AND user_id = ?`,
+    const [result] = await req.conn.execute(
+      `UPDATE v_user_categories SET name = ?, type = ? WHERE id = ? AND user_id = ?`,
       [name, type, req.params.id, req.userId]
     );
     if (result.affectedRows === 0) {
@@ -192,8 +207,8 @@ app.put('/api/categories/:id', async (req, res) => {
 
 app.delete('/api/categories/:id', async (req, res) => {
   try {
-    const [result] = await pool.execute(
-      `DELETE FROM categories WHERE id = ? AND user_id = ?`,
+    const [result] = await req.conn.execute(
+      `DELETE FROM v_user_categories WHERE id = ? AND user_id = ?`,
       [req.params.id, req.userId]
     );
     if (result.affectedRows === 0) {
@@ -210,14 +225,13 @@ app.delete('/api/categories/:id', async (req, res) => {
 
 app.get('/api/transactions', async (req, res) => {
   try {
-    const [rows] = await pool.execute(
+    const [rows] = await req.conn.execute(
       `SELECT t.id AS transaction_id, t.amount, t.transaction_date, t.transaction_type,
               t.notes, t.category_id, c.name AS category_name
-         FROM transactions t
-         JOIN categories   c ON c.id = t.category_id
-        WHERE t.user_id = ?
+         FROM v_user_transactions t
+         JOIN v_user_categories   c ON c.id = t.category_id
         ORDER BY t.transaction_date DESC, t.id DESC`,
-      [req.userId]
+      []
     );
     res.json(rows);
   } catch (err) {
@@ -236,8 +250,8 @@ app.post('/api/transactions', async (req, res) => {
   }
 
   try {
-    const [result] = await pool.execute(
-      `INSERT INTO transactions
+    const [result] = await req.conn.execute(
+      `INSERT INTO v_user_transactions
          (user_id, category_id, amount, transaction_date, transaction_type, notes)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [req.userId, categoryId, amount, date, type, notes || null]
@@ -259,8 +273,8 @@ app.put('/api/transactions/:id', async (req, res) => {
   }
 
   try {
-    const [result] = await pool.execute(
-      `UPDATE transactions
+    const [result] = await req.conn.execute(
+      `UPDATE v_user_transactions
           SET amount = ?, transaction_date = ?, transaction_type = ?,
               category_id = ?, notes = ?
         WHERE id = ? AND user_id = ?`,
@@ -278,8 +292,8 @@ app.put('/api/transactions/:id', async (req, res) => {
 
 app.delete('/api/transactions/:id', async (req, res) => {
   try {
-    const [result] = await pool.execute(
-      `DELETE FROM transactions WHERE id = ? AND user_id = ?`,
+    const [result] = await req.conn.execute(
+      `DELETE FROM v_user_transactions WHERE id = ? AND user_id = ?`,
       [req.params.id, req.userId]
     );
     if (result.affectedRows === 0) {
@@ -296,15 +310,14 @@ app.delete('/api/transactions/:id', async (req, res) => {
 
 app.get('/api/reports/monthly', async (req, res) => {
   try {
-    const [rows] = await pool.execute(
+    const [rows] = await req.conn.execute(
       `SELECT DATE_FORMAT(transaction_date, '%Y-%m') AS month,
               transaction_type,
               SUM(amount) AS total
-         FROM transactions
-        WHERE user_id = ?
+         FROM v_user_transactions
         GROUP BY month, transaction_type
         ORDER BY month DESC, transaction_type`,
-      [req.userId]
+      []
     );
     res.json(rows);
   } catch (err) {
@@ -315,14 +328,13 @@ app.get('/api/reports/monthly', async (req, res) => {
 
 app.get('/api/reports/by-category', async (req, res) => {
   try {
-    const [rows] = await pool.execute(
+    const [rows] = await req.conn.execute(
       `SELECT c.name AS category_name, c.type AS category_type, SUM(t.amount) AS total
-         FROM transactions t
-         JOIN categories   c ON c.id = t.category_id
-        WHERE t.user_id = ?
+         FROM v_user_transactions t
+         JOIN v_user_categories   c ON c.id = t.category_id
         GROUP BY c.id
         ORDER BY total DESC`,
-      [req.userId]
+      []
     );
     res.json(rows);
   } catch (err) {
