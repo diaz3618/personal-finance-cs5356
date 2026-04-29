@@ -161,6 +161,7 @@ DELIMITER ;
 
 -- RLS: restricted application account (Phase 03)
 CREATE USER IF NOT EXISTS 'app_user'@'%' IDENTIFIED BY 'pf_app_2026';
+REVOKE ALL PRIVILEGES, GRANT OPTION FROM 'app_user'@'%';
 
 -- Helper function: MySQL views cannot reference session variables directly (ERROR 1351).
 -- This wrapper function is SECURITY DEFINER so that app_user (which executes the views)

@@ -342,6 +342,76 @@ app.get('/api/reports/by-category', async (req, res) => {
   }
 });
 
+// --- Budgets ----------------------------------------------------------------
+
+app.get('/api/budgets', async (req, res) => {
+  try {
+    const [rows] = await req.conn.execute(
+      `SELECT id, user_id, category_id, category_name, month, limit_amount, actual_amount, created_at
+         FROM v_user_budgets
+        ORDER BY month DESC, category_name`,
+      []
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load budgets.' });
+  }
+});
+
+app.post('/api/budgets', async (req, res) => {
+  const { category_id, month, limit_amount } = req.body;
+  if (!category_id || !month || limit_amount == null) {
+    return res.status(400).json({ error: 'category_id, month, and limit_amount are required.' });
+  }
+  try {
+    const [result] = await req.conn.execute(
+      `INSERT INTO budgets (user_id, category_id, month, limit_amount) VALUES (?, ?, ?, ?)`,
+      [req.userId, category_id, month, limit_amount]
+    );
+    res.status(201).json({ id: result.insertId, user_id: req.userId, category_id, month, limit_amount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create budget.' });
+  }
+});
+
+app.put('/api/budgets/:id', async (req, res) => {
+  const { limit_amount } = req.body;
+  if (limit_amount == null) {
+    return res.status(400).json({ error: 'limit_amount is required.' });
+  }
+  try {
+    const [result] = await req.conn.execute(
+      `UPDATE budgets SET limit_amount = ? WHERE id = ? AND user_id = ?`,
+      [limit_amount, req.params.id, req.userId]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Budget not found.' });
+    }
+    res.json({ id: Number(req.params.id), limit_amount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update budget.' });
+  }
+});
+
+app.delete('/api/budgets/:id', async (req, res) => {
+  try {
+    const [result] = await req.conn.execute(
+      `DELETE FROM budgets WHERE id = ? AND user_id = ?`,
+      [req.params.id, req.userId]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Budget not found.' });
+    }
+    res.status(204).send();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete budget.' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`pf-tracker listening on http://localhost:${PORT}`);
 });
