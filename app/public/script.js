@@ -12,15 +12,15 @@ async function initClerk() {
   const domain = atob(pk.split('_')[2]).slice(0, -1);
   await new Promise((res, rej) => {
     const s = document.createElement('script');
-    s.src = `https://${domain}/npm/@clerk/ui@1/dist/ui.browser.js`;
+    s.src = `https://${domain}/npm/@clerk/clerk-js@latest/dist/clerk.browser.js`;
+    s.setAttribute('data-clerk-publishable-key', pk);
     s.crossOrigin = 'anonymous';
     s.onload = res;
     s.onerror = () => rej(new Error('Clerk bundle failed to load'));
     document.head.appendChild(s);
   });
-  const c = new window.Clerk(pk);
-  await c.load({ ui: { ClerkUI: window.__internal_ClerkUICtor } });
-  return c;
+  await window.Clerk.load();
+  return window.Clerk;
 }
 
 async function authHeaders() {
