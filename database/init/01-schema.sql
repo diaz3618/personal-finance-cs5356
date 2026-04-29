@@ -158,3 +158,69 @@ BEGIN
 END //
 
 DELIMITER ;
+
+-- RLS: restricted application account (Phase 03)
+CREATE USER IF NOT EXISTS 'app_user'@'%' IDENTIFIED BY 'pf_app_2026';
+
+-- Helper function: MySQL views cannot reference session variables directly (ERROR 1351).
+-- This wrapper function is SECURITY DEFINER so that app_user (which executes the views)
+-- can call it even though it has no direct access to @current_user_id as a raw expression.
+CREATE DEFINER=`root`@`localhost` FUNCTION current_app_user_id()
+  RETURNS INT
+  NOT DETERMINISTIC
+  NO SQL
+  SQL SECURITY DEFINER
+RETURN @current_user_id;
+
+-- Security-definer views for row-level isolation via current_app_user_id() session function
+CREATE OR REPLACE DEFINER=`root`@`localhost` SQL SECURITY DEFINER
+VIEW v_user_transactions AS
+SELECT id, user_id, category_id, amount, transaction_type, transaction_date, notes, created_at
+  FROM transactions
+ WHERE user_id = current_app_user_id()
+WITH LOCAL CHECK OPTION;
+
+CREATE OR REPLACE DEFINER=`root`@`localhost` SQL SECURITY DEFINER
+VIEW v_user_categories AS
+SELECT id, user_id, name, type, created_at
+  FROM categories
+ WHERE user_id = current_app_user_id()
+WITH LOCAL CHECK OPTION;
+
+CREATE OR REPLACE DEFINER=`root`@`localhost` SQL SECURITY DEFINER
+VIEW v_user_budgets AS
+SELECT b.id, b.user_id, b.category_id, c.name AS category_name,
+       b.month, b.limit_amount,
+       COALESCE(SUM(t.amount), 0) AS actual_amount,
+       b.created_at
+  FROM budgets b
+  JOIN categories c ON c.id = b.category_id
+  LEFT JOIN transactions t
+         ON t.category_id = b.category_id
+        AND t.user_id = b.user_id
+        AND t.transaction_type = 'expense'
+        AND DATE_FORMAT(t.transaction_date, '%Y-%m') = DATE_FORMAT(b.month, '%Y-%m')
+ WHERE b.user_id = current_app_user_id()
+ GROUP BY b.id, b.user_id, b.category_id, c.name, b.month, b.limit_amount, b.created_at;
+
+CREATE OR REPLACE DEFINER=`root`@`localhost` SQL SECURITY DEFINER
+VIEW v_transaction_detail AS
+SELECT t.id AS transaction_id, t.user_id,
+       t.amount, t.transaction_type, t.transaction_date, t.notes,
+       c.id AS category_id, c.name AS category_name, c.type AS category_type,
+       u.email, u.display_name
+  FROM transactions t
+  JOIN categories c ON c.id = t.category_id
+  JOIN users      u ON u.id = t.user_id;
+
+-- Grants: app_user reads/writes through views; direct table grants only where view is non-updatable
+GRANT SELECT ON personal_finance.v_user_transactions   TO 'app_user'@'%';
+GRANT SELECT ON personal_finance.v_user_categories     TO 'app_user'@'%';
+GRANT SELECT ON personal_finance.v_user_budgets        TO 'app_user'@'%';
+GRANT SELECT ON personal_finance.v_transaction_detail  TO 'app_user'@'%';
+GRANT INSERT, UPDATE, DELETE ON personal_finance.v_user_transactions TO 'app_user'@'%';
+GRANT INSERT, UPDATE, DELETE ON personal_finance.v_user_categories   TO 'app_user'@'%';
+-- v_user_budgets is a join/aggregate view (non-updatable); grant direct table access for writes
+GRANT INSERT, UPDATE, DELETE ON personal_finance.budgets             TO 'app_user'@'%';
+
+FLUSH PRIVILEGES;
