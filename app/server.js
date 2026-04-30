@@ -3,6 +3,7 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const { adminPool, appPool } = require('./db');
+const redis = require('./redis');
 const { clerkMiddleware, getAuth } = require('@clerk/express');
 const { Webhook } = require('svix');
 const cors = require('cors');
@@ -58,6 +59,7 @@ const webhookHandler = async (req, res) => {
       'DELETE FROM users WHERE clerk_user_id = ?',
       [evt.data.id]
     );
+    await redis.del(`clerk:${evt.data.id}`);
   }
 
   res.json({ received: true });
@@ -81,6 +83,12 @@ const checkAuth = (req, res, next) => {
 const resolveDbUser = async (req, res, next) => {
   try {
     const { userId: clerkUserId } = getAuth(req);
+    const cacheKey = `clerk:${clerkUserId}`;
+    const cached = await redis.get(cacheKey);
+    if (cached !== null) {
+      req.userId = parseInt(cached, 10);
+      return next();
+    }
     const [rows] = await adminPool.execute(
       'SELECT id FROM users WHERE clerk_user_id = ?',
       [clerkUserId]
@@ -104,6 +112,7 @@ const resolveDbUser = async (req, res, next) => {
     } else {
       req.userId = rows[0].id;
     }
+    await redis.set(cacheKey, req.userId, 'EX', 3600);
     next();
   } catch (err) {
     next(err);
@@ -125,6 +134,8 @@ const setUserConn = async (req, res, next) => {
     next(err);
   }
 };
+
+app.get('/health', (req, res) => res.sendStatus(200));
 
 app.use('/api', clerkMiddleware(), checkAuth, resolveDbUser, setUserConn);
 
