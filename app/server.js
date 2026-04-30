@@ -144,6 +144,61 @@ app.get('/api/auth/me', async (req, res) => {
   }
 });
 
+// --- Dashboard --------------------------------------------------------------
+
+app.get('/api/dashboard/summary', async (req, res) => {
+  const now       = new Date();
+  const year      = now.getFullYear();
+  const month     = now.getMonth();
+  const startDate = new Date(year, month, 1).toISOString().slice(0, 10);
+  const endDate   = new Date(year, month + 1, 0).toISOString().slice(0, 10);
+
+  try {
+    const [[balRow]]  = await req.conn.execute(
+      'SELECT fn_net_balance(?) AS net_balance',
+      [req.userId]
+    );
+    const [[daysRow]] = await req.conn.execute(
+      'SELECT fn_days_in_period(?, ?) AS days_in_period',
+      [startDate, endDate]
+    );
+    res.json({
+      net_balance: balRow.net_balance,
+      period: {
+        start_date:     startDate,
+        end_date:       endDate,
+        days_in_period: daysRow.days_in_period,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load dashboard summary.' });
+  }
+});
+
+app.get('/api/dashboard/running-balance', async (req, res) => {
+  try {
+    const [rows] = await req.conn.execute(
+      `SELECT id               AS transaction_id,
+              transaction_date,
+              transaction_type,
+              amount,
+              SUM(CASE
+                    WHEN transaction_type = 'income'  THEN  amount
+                    WHEN transaction_type = 'expense' THEN -amount
+                  END)
+                OVER (ORDER BY transaction_date ASC, id ASC) AS running_balance
+         FROM v_user_transactions
+        ORDER BY transaction_date ASC, id ASC`,
+      []
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load running balance.' });
+  }
+});
+
 // --- Categories -------------------------------------------------------------
 
 app.get('/api/categories', async (req, res) => {
@@ -289,6 +344,30 @@ app.put('/api/transactions/:id', async (req, res) => {
   }
 });
 
+app.put('/api/transactions/:id/category', async (req, res) => {
+  const { category_id } = req.body || {};
+  if (!category_id) {
+    return res.status(400).json({ error: 'category_id is required.' });
+  }
+
+  try {
+    await req.conn.execute(
+      'CALL usp_transfer_category(?, ?, ?)',
+      [req.params.id, category_id, req.userId]
+    );
+    res.json({
+      transaction_id: Number(req.params.id),
+      category_id:    Number(category_id),
+    });
+  } catch (err) {
+    if (err.sqlMessage) {
+      return res.status(400).json({ error: err.sqlMessage });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Failed to transfer category.' });
+  }
+});
+
 app.delete('/api/transactions/:id', async (req, res) => {
   try {
     const [result] = await req.conn.execute(
@@ -308,20 +387,22 @@ app.delete('/api/transactions/:id', async (req, res) => {
 // --- Reports ----------------------------------------------------------------
 
 app.get('/api/reports/monthly', async (req, res) => {
+  const year  = parseInt(req.query.year  ?? new Date().getFullYear(),  10);
+  const month = parseInt(req.query.month ?? (new Date().getMonth() + 1), 10);
+
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    return res.status(400).json({ error: 'Invalid year or month.' });
+  }
+
   try {
     const [rows] = await req.conn.execute(
-      `SELECT DATE_FORMAT(transaction_date, '%Y-%m') AS month,
-              transaction_type,
-              SUM(amount) AS total
-         FROM v_user_transactions
-        GROUP BY month, transaction_type
-        ORDER BY month DESC, transaction_type`,
-      []
+      'CALL usp_monthly_summary(?, ?, ?)',
+      [req.userId, year, month]
     );
-    res.json(rows);
+    res.json(rows[0]);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to load monthly report.' });
+    res.status(500).json({ error: 'Failed to load monthly summary.' });
   }
 });
 
@@ -339,6 +420,78 @@ app.get('/api/reports/by-category', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load category report.' });
+  }
+});
+
+app.get('/api/reports/category-rank', async (req, res) => {
+  const year  = parseInt(req.query.year  ?? new Date().getFullYear(),  10);
+  const month = parseInt(req.query.month ?? (new Date().getMonth() + 1), 10);
+
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    return res.status(400).json({ error: 'Invalid year or month.' });
+  }
+
+  try {
+    const [rows] = await req.conn.execute(
+      `SELECT c.name AS category_name,
+              c.type AS category_type,
+              SUM(t.amount) AS total,
+              RANK() OVER (ORDER BY SUM(t.amount) DESC) AS spend_rank
+         FROM v_user_transactions t
+         JOIN v_user_categories   c ON c.id = t.category_id
+        WHERE YEAR(t.transaction_date)  = ?
+          AND MONTH(t.transaction_date) = ?
+        GROUP BY c.id, c.name, c.type
+        ORDER BY spend_rank ASC`,
+      [year, month]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load category rank.' });
+  }
+});
+
+// --- Export -----------------------------------------------------------------
+
+app.get('/api/export/transactions', async (req, res) => {
+  try {
+    const [rows] = await req.conn.execute(
+      `WITH export_data AS (
+           SELECT t.id,
+                  t.transaction_date,
+                  t.transaction_type,
+                  t.amount,
+                  c.name  AS category_name,
+                  t.notes
+             FROM v_user_transactions t
+             JOIN v_user_categories   c ON c.id = t.category_id
+            ORDER BY t.transaction_date DESC, t.id DESC
+       )
+       SELECT * FROM export_data`,
+      []
+    );
+
+    const escape = (val) => {
+      if (val == null) return '';
+      const str = String(val);
+      return str.includes(',') || str.includes('"') || str.includes('\n')
+        ? `"${str.replace(/"/g, '""')}"`
+        : str;
+    };
+
+    const header = 'id,transaction_date,transaction_type,amount,category_name,notes\n';
+    const body   = rows.map(r =>
+      [r.id, r.transaction_date, r.transaction_type, r.amount,
+       escape(r.category_name), escape(r.notes)].join(',')
+    ).join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="transactions.csv"');
+    res.send(header + body);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to export transactions.' });
   }
 });
 
