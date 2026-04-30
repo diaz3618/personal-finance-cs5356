@@ -1,0 +1,223 @@
+apiVersion: v1
+data:
+  01-schema.sql: "-- Runs from docker-entrypoint-initdb.d; database name set by MYSQL_DATABASE\n\nCREATE TABLE users (\n \
+    \   id              INT             NOT NULL AUTO_INCREMENT,\n    clerk_user_id   VARCHAR(255)    NULL,\n    email   \
+    \        VARCHAR(255)    NULL,\n    display_name    VARCHAR(100)    NULL,\n    created_at      TIMESTAMP       NOT NULL\
+    \ DEFAULT CURRENT_TIMESTAMP,\n\n    PRIMARY KEY (id),\n    UNIQUE KEY uq_users_email (email),\n    UNIQUE KEY uq_users_clerk_id\
+    \ (clerk_user_id)\n) ENGINE=InnoDB;\n\nCREATE TABLE categories (\n    id              INT             NOT NULL AUTO_INCREMENT,\n\
+    \    user_id         INT             NOT NULL,\n    name            VARCHAR(100)    NOT NULL,\n    type            ENUM('income',\
+    \ 'expense') NOT NULL,\n    created_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,\n\n    PRIMARY KEY (id),\n\
+    \n    CONSTRAINT fk_categories_user\n        FOREIGN KEY (user_id) REFERENCES users(id)\n        ON DELETE CASCADE,\n\n\
+    \    CONSTRAINT uq_categories_user_name\n        UNIQUE (user_id, name)\n) ENGINE=InnoDB;\n\nCREATE INDEX idx_categories_user\
+    \ ON categories(user_id);\n\nCREATE TABLE transactions (\n    id               INT             NOT NULL AUTO_INCREMENT,\n\
+    \    user_id          INT             NOT NULL,\n    category_id      INT             NOT NULL,\n    amount          \
+    \ DECIMAL(10,2)   NOT NULL,\n    transaction_type ENUM('income', 'expense') NOT NULL,\n    transaction_date DATE     \
+    \       NOT NULL,\n    notes            VARCHAR(255)    NULL,\n    created_at       TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,\n\
+    \n    PRIMARY KEY (id),\n\n    CONSTRAINT fk_transactions_user\n        FOREIGN KEY (user_id) REFERENCES users(id)\n \
+    \       ON DELETE CASCADE,\n\n    CONSTRAINT fk_transactions_category\n        FOREIGN KEY (category_id) REFERENCES categories(id)\n\
+    \        ON DELETE RESTRICT,\n\n    CONSTRAINT chk_transactions_amount\n        CHECK (amount > 0)\n) ENGINE=InnoDB;\n\
+    \nCREATE INDEX idx_transactions_user_date ON transactions(user_id, transaction_date);\nCREATE INDEX idx_transactions_category\
+    \  ON transactions(category_id);\n\nCREATE TABLE budgets (\n    id              INT             NOT NULL AUTO_INCREMENT,\n\
+    \    user_id         INT             NOT NULL,\n    category_id     INT             NOT NULL,\n    month           DATE\
+    \            NOT NULL,\n    limit_amount    DECIMAL(10,2)   NOT NULL,\n    created_at      TIMESTAMP       NOT NULL DEFAULT\
+    \ CURRENT_TIMESTAMP,\n\n    PRIMARY KEY (id),\n\n    CONSTRAINT fk_budgets_user\n        FOREIGN KEY (user_id) REFERENCES\
+    \ users(id)\n        ON DELETE CASCADE,\n\n    CONSTRAINT fk_budgets_category\n        FOREIGN KEY (category_id) REFERENCES\
+    \ categories(id)\n        ON DELETE CASCADE,\n\n    CONSTRAINT chk_budgets_limit\n        CHECK (limit_amount > 0),\n\n\
+    \    CONSTRAINT uq_budgets_user_category_month\n        UNIQUE (user_id, category_id, month)\n) ENGINE=InnoDB;\n\nCREATE\
+    \ INDEX idx_budgets_user ON budgets(user_id);\n\nCREATE TABLE budget_alerts (\n    id              INT             NOT\
+    \ NULL AUTO_INCREMENT,\n    user_id         INT             NOT NULL,\n    category_id     INT             NOT NULL,\n\
+    \    month           DATE            NOT NULL,\n    actual_amount   DECIMAL(10,2)   NOT NULL,\n    limit_amount    DECIMAL(10,2)\
+    \   NOT NULL,\n    triggered_at    TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,\n\n    PRIMARY KEY (id),\n\n  \
+    \  CONSTRAINT fk_budget_alerts_user\n        FOREIGN KEY (user_id) REFERENCES users(id)\n        ON DELETE CASCADE,\n\n\
+    \    CONSTRAINT fk_budget_alerts_category\n        FOREIGN KEY (category_id) REFERENCES categories(id)\n        ON DELETE\
+    \ CASCADE,\n\n    CONSTRAINT uq_budget_alerts_user_cat_month\n        UNIQUE (user_id, category_id, month)\n) ENGINE=InnoDB;\n\
+    \nCREATE TABLE transaction_audit_log (\n    id              INT             NOT NULL AUTO_INCREMENT,\n    transaction_id\
+    \  INT             NULL,\n    action          ENUM('INSERT', 'UPDATE', 'DELETE') NOT NULL,\n    old_amount      DECIMAL(10,2)\
+    \   NULL,\n    new_amount      DECIMAL(10,2)   NULL,\n    changed_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,\n\
+    \    changed_by      INT             NULL,\n\n    PRIMARY KEY (id),\n\n    CONSTRAINT fk_audit_log_transaction\n     \
+    \   FOREIGN KEY (transaction_id) REFERENCES transactions(id)\n        ON DELETE SET NULL\n) ENGINE=InnoDB;\n\nCREATE INDEX\
+    \ idx_audit_log_transaction ON transaction_audit_log(transaction_id);\n\nDELIMITER //\n\nCREATE TRIGGER trg_check_type_match_insert\n\
+    BEFORE INSERT ON transactions\nFOR EACH ROW\nBEGIN\n    DECLARE cat_type ENUM('income', 'expense');\n\n    SELECT type\
+    \ INTO cat_type\n    FROM categories\n    WHERE id = NEW.category_id;\n\n    IF cat_type <> NEW.transaction_type THEN\n\
+    \        SIGNAL SQLSTATE '45000'\n            SET MESSAGE_TEXT = 'transaction_type must match the category type';\n  \
+    \  END IF;\nEND //\n\nCREATE TRIGGER trg_check_type_match_update\nBEFORE UPDATE ON transactions\nFOR EACH ROW\nBEGIN\n\
+    \    DECLARE cat_type ENUM('income', 'expense');\n\n    SELECT type INTO cat_type\n    FROM categories\n    WHERE id =\
+    \ NEW.category_id;\n\n    IF cat_type <> NEW.transaction_type THEN\n        SIGNAL SQLSTATE '45000'\n            SET MESSAGE_TEXT\
+    \ = 'transaction_type must match the category type';\n    END IF;\nEND //\n\nDELIMITER ;\n\n-- RLS: restricted application\
+    \ account (Phase 03)\nCREATE USER IF NOT EXISTS 'app_user'@'%' IDENTIFIED BY 'pf_app_2026';\nREVOKE ALL PRIVILEGES, GRANT\
+    \ OPTION FROM 'app_user'@'%';\n\n-- Helper function: MySQL views cannot reference session variables directly (ERROR 1351).\n\
+    -- This wrapper function is SECURITY DEFINER so that app_user (which executes the views)\n-- can call it even though it\
+    \ has no direct access to @current_user_id as a raw expression.\nCREATE DEFINER=`root`@`localhost` FUNCTION current_app_user_id()\n\
+    \  RETURNS INT\n  NOT DETERMINISTIC\n  NO SQL\n  SQL SECURITY DEFINER\nRETURN @current_user_id;\n\n-- Security-definer\
+    \ views for row-level isolation via current_app_user_id() session function\nCREATE OR REPLACE DEFINER=`root`@`localhost`\
+    \ SQL SECURITY DEFINER\nVIEW v_user_transactions AS\nSELECT id, user_id, category_id, amount, transaction_type, transaction_date,\
+    \ notes, created_at\n  FROM transactions\n WHERE user_id = current_app_user_id()\nWITH LOCAL CHECK OPTION;\n\nCREATE OR\
+    \ REPLACE DEFINER=`root`@`localhost` SQL SECURITY DEFINER\nVIEW v_user_categories AS\nSELECT id, user_id, name, type,\
+    \ created_at\n  FROM categories\n WHERE user_id = current_app_user_id()\nWITH LOCAL CHECK OPTION;\n\nCREATE OR REPLACE\
+    \ DEFINER=`root`@`localhost` SQL SECURITY DEFINER\nVIEW v_user_budgets AS\nSELECT b.id, b.user_id, b.category_id, c.name\
+    \ AS category_name,\n       b.month, b.limit_amount,\n       COALESCE(SUM(t.amount), 0) AS actual_amount,\n       b.created_at\n\
+    \  FROM budgets b\n  JOIN categories c ON c.id = b.category_id\n  LEFT JOIN transactions t\n         ON t.category_id\
+    \ = b.category_id\n        AND t.user_id = b.user_id\n        AND t.transaction_type = 'expense'\n        AND DATE_FORMAT(t.transaction_date,\
+    \ '%Y-%m') = DATE_FORMAT(b.month, '%Y-%m')\n WHERE b.user_id = current_app_user_id()\n GROUP BY b.id, b.user_id, b.category_id,\
+    \ c.name, b.month, b.limit_amount, b.created_at;\n\nCREATE OR REPLACE DEFINER=`root`@`localhost` SQL SECURITY DEFINER\n\
+    VIEW v_transaction_detail AS\nSELECT t.id AS transaction_id, t.user_id,\n       t.amount, t.transaction_type, t.transaction_date,\
+    \ t.notes,\n       c.id AS category_id, c.name AS category_name, c.type AS category_type,\n       u.email, u.display_name\n\
+    \  FROM transactions t\n  JOIN categories c ON c.id = t.category_id\n  JOIN users      u ON u.id = t.user_id;\n\n-- Grants:\
+    \ app_user reads/writes through views; direct table grants only where view is non-updatable\nGRANT SELECT ON personal_finance.v_user_transactions\
+    \   TO 'app_user'@'%';\nGRANT SELECT ON personal_finance.v_user_categories     TO 'app_user'@'%';\nGRANT SELECT ON personal_finance.v_user_budgets\
+    \        TO 'app_user'@'%';\nGRANT SELECT ON personal_finance.v_transaction_detail  TO 'app_user'@'%';\nGRANT INSERT,\
+    \ UPDATE, DELETE ON personal_finance.v_user_transactions TO 'app_user'@'%';\nGRANT INSERT, UPDATE, DELETE ON personal_finance.v_user_categories\
+    \   TO 'app_user'@'%';\n-- v_user_budgets is a join/aggregate view (non-updatable); grant direct table access for writes\n\
+    GRANT INSERT, UPDATE, DELETE ON personal_finance.budgets             TO 'app_user'@'%';\n-- Schema-wide EXECUTE covers\
+    \ both stored procedures and functions in MySQL.\n-- The PROCEDURE/FUNCTION keyword on GRANT applies only to specific\
+    \ routine names.\nGRANT EXECUTE ON personal_finance.* TO 'app_user'@'%';\n\nFLUSH PRIVILEGES;\n\n-- Phase 4: Stored procedures\
+    \ (PL/SQL — Lecture 6)\nDELIMITER //\n\nCREATE DEFINER=`root`@`localhost` PROCEDURE usp_monthly_summary(\n    IN p_user_id\
+    \ INT,\n    IN p_year    INT,\n    IN p_month   INT\n)\nSQL SECURITY DEFINER\nBEGIN\n    DECLARE done       INT      \
+    \     DEFAULT 0;\n    DECLARE v_cat_id   INT;\n    DECLARE v_cat_name VARCHAR(100);\n    DECLARE v_cat_type ENUM('income',\
+    \ 'expense');\n    DECLARE v_total    DECIMAL(10,2) DEFAULT 0.00;\n\n    DECLARE cur CURSOR FOR\n        SELECT c.id,\
+    \ c.name, c.type, COALESCE(SUM(t.amount), 0.00)\n          FROM categories c\n          LEFT JOIN transactions t\n   \
+    \              ON t.category_id = c.id\n                AND t.user_id     = p_user_id\n                AND YEAR(t.transaction_date)\
+    \  = p_year\n                AND MONTH(t.transaction_date) = p_month\n         WHERE c.user_id = p_user_id\n         GROUP\
+    \ BY c.id, c.name, c.type;\n\n    DECLARE CONTINUE HANDLER FOR NOT FOUND    SET done = 1;\n    DECLARE CONTINUE HANDLER\
+    \ FOR SQLEXCEPTION BEGIN END;\n\n    DROP   TEMPORARY TABLE IF EXISTS tmp_monthly_summary;\n    CREATE TEMPORARY TABLE\
+    \ tmp_monthly_summary (\n        category_id   INT,\n        category_name VARCHAR(100),\n        category_type ENUM('income',\
+    \ 'expense'),\n        total         DECIMAL(10,2)\n    );\n\n    OPEN cur;\n    read_loop: LOOP\n        FETCH cur INTO\
+    \ v_cat_id, v_cat_name, v_cat_type, v_total;\n        IF done THEN LEAVE read_loop; END IF;\n        INSERT INTO tmp_monthly_summary\
+    \ VALUES (v_cat_id, v_cat_name, v_cat_type, v_total);\n    END LOOP;\n    CLOSE cur;\n\n    SELECT * FROM tmp_monthly_summary\
+    \ ORDER BY category_type, category_name;\n    DROP TEMPORARY TABLE IF EXISTS tmp_monthly_summary;\nEND //\n\nCREATE DEFINER=`root`@`localhost`\
+    \ PROCEDURE usp_apply_budget_alert(\n    IN p_user_id INT\n)\nSQL SECURITY DEFINER\nBEGIN\n    DECLARE done     INT  \
+    \         DEFAULT 0;\n    DECLARE err_flag INT           DEFAULT 0;\n    DECLARE v_cat_id INT;\n    DECLARE v_month  DATE;\n\
+    \    DECLARE v_limit  DECIMAL(10,2);\n    DECLARE v_actual DECIMAL(10,2);\n\n    DECLARE cur CURSOR FOR\n        SELECT\
+    \ b.category_id,\n               b.month,\n               b.limit_amount,\n               COALESCE(SUM(t.amount), 0.00)\
+    \ AS actual_spend\n          FROM budgets b\n          LEFT JOIN transactions t\n                 ON t.category_id   \
+    \   = b.category_id\n                AND t.user_id          = b.user_id\n                AND t.transaction_type = 'expense'\n\
+    \                AND DATE_FORMAT(t.transaction_date, '%Y-%m') = DATE_FORMAT(b.month, '%Y-%m')\n         WHERE b.user_id\
+    \ = p_user_id\n         GROUP BY b.category_id, b.month, b.limit_amount\n        HAVING actual_spend > b.limit_amount;\n\
+    \n    DECLARE CONTINUE HANDLER FOR NOT FOUND    SET done = 1;\n    DECLARE CONTINUE HANDLER FOR SQLEXCEPTION SET err_flag\
+    \ = 1;\n\n    START TRANSACTION;\n\n    OPEN cur;\n    alert_loop: LOOP\n        FETCH cur INTO v_cat_id, v_month, v_limit,\
+    \ v_actual;\n        IF done THEN LEAVE alert_loop; END IF;\n\n        SET err_flag = 0;\n        SAVEPOINT sp_budget_check;\n\
+    \n        INSERT IGNORE INTO budget_alerts\n            (user_id, category_id, month, actual_amount, limit_amount)\n \
+    \       VALUES\n            (p_user_id, v_cat_id, v_month, v_actual, v_limit);\n\n        IF err_flag THEN\n         \
+    \   ROLLBACK TO SAVEPOINT sp_budget_check;\n            SET err_flag = 0;\n        END IF;\n    END LOOP;\n    CLOSE cur;\n\
+    \n    COMMIT;\nEND //\n\nCREATE DEFINER=`root`@`localhost` PROCEDURE usp_transfer_category(\n    IN p_transaction_id \
+    \ INT,\n    IN p_new_category_id INT,\n    IN p_user_id         INT\n)\nSQL SECURITY DEFINER\nBEGIN\n    DECLARE v_tx_type\
+    \  ENUM('income', 'expense');\n    DECLARE v_cat_type ENUM('income', 'expense');\n\n    DECLARE EXIT HANDLER FOR SQLEXCEPTION\n\
+    \    BEGIN\n        ROLLBACK;\n        RESIGNAL;\n    END;\n\n    START TRANSACTION;\n\n    SELECT transaction_type INTO\
+    \ v_tx_type\n      FROM transactions\n     WHERE id = p_transaction_id AND user_id = p_user_id\n       FOR UPDATE;\n\n\
+    \    IF v_tx_type IS NULL THEN\n        SIGNAL SQLSTATE '45000'\n            SET MESSAGE_TEXT = 'Transaction not found\
+    \ or not owned by user';\n    END IF;\n\n    SELECT type INTO v_cat_type\n      FROM categories\n     WHERE id = p_new_category_id\
+    \ AND user_id = p_user_id;\n\n    IF v_cat_type IS NULL THEN\n        SIGNAL SQLSTATE '45000'\n            SET MESSAGE_TEXT\
+    \ = 'Category not found or not owned by user';\n    END IF;\n\n    IF v_tx_type <> v_cat_type THEN\n        SIGNAL SQLSTATE\
+    \ '45000'\n            SET MESSAGE_TEXT = 'Category type does not match transaction type';\n    END IF;\n\n    UPDATE\
+    \ transactions\n       SET category_id = p_new_category_id\n     WHERE id = p_transaction_id AND user_id = p_user_id;\n\
+    \n    COMMIT;\nEND //\n\nDELIMITER ;\n\n-- Phase 4: Stored functions (Lecture 6)\nDELIMITER //\n\nCREATE DEFINER=`root`@`localhost`\
+    \ FUNCTION fn_net_balance(p_user_id INT)\n    RETURNS DECIMAL(10,2)\n    READS SQL DATA\n    SQL SECURITY DEFINER\nBEGIN\n\
+    \    DECLARE v_income  DECIMAL(10,2) DEFAULT 0.00;\n    DECLARE v_expense DECIMAL(10,2) DEFAULT 0.00;\n\n    SELECT COALESCE(SUM(amount),\
+    \ 0.00) INTO v_income\n      FROM transactions\n     WHERE user_id = p_user_id AND transaction_type = 'income';\n\n  \
+    \  SELECT COALESCE(SUM(amount), 0.00) INTO v_expense\n      FROM transactions\n     WHERE user_id = p_user_id AND transaction_type\
+    \ = 'expense';\n\n    RETURN v_income - v_expense;\nEND //\n\nCREATE DEFINER=`root`@`localhost` FUNCTION fn_days_in_period(\n\
+    \    p_start_date DATE,\n    p_end_date   DATE\n)\n    RETURNS INT\n    DETERMINISTIC\n    NO SQL\n    SQL SECURITY DEFINER\n\
+    RETURN DATEDIFF(p_end_date, p_start_date) + 1 //\n\nDELIMITER ;\n\n-- Phase 4: Composite audit trigger (AFTER INSERT/UPDATE/DELETE\
+    \ on transactions — Lecture 6)\n-- MySQL requires one trigger per event type; all three write to transaction_audit_log.\n\
+    DELIMITER //\n\nCREATE TRIGGER trg_log_tx_changes_insert\nAFTER INSERT ON transactions\nFOR EACH ROW\nBEGIN\n    INSERT\
+    \ INTO transaction_audit_log\n        (transaction_id, action, old_amount, new_amount, changed_by)\n    VALUES\n     \
+    \   (NEW.id, 'INSERT', NULL, NEW.amount, NEW.user_id);\nEND //\n\nCREATE TRIGGER trg_log_tx_changes_update\nAFTER UPDATE\
+    \ ON transactions\nFOR EACH ROW\nBEGIN\n    INSERT INTO transaction_audit_log\n        (transaction_id, action, old_amount,\
+    \ new_amount, changed_by)\n    VALUES\n        (NEW.id, 'UPDATE', OLD.amount, NEW.amount, NEW.user_id);\nEND //\n\n--\
+    \ BEFORE DELETE so the parent row still exists when the audit row is inserted;\n-- the FK on transaction_audit_log.transaction_id\
+    \ (ON DELETE SET NULL) then nulls\n-- the just-inserted audit row's transaction_id once the actual DELETE completes.\n\
+    CREATE TRIGGER trg_log_tx_changes_delete\nBEFORE DELETE ON transactions\nFOR EACH ROW\nBEGIN\n    INSERT INTO transaction_audit_log\n\
+    \        (transaction_id, action, old_amount, new_amount, changed_by)\n    VALUES\n        (OLD.id, 'DELETE', OLD.amount,\
+    \ NULL, OLD.user_id);\nEND //\n\nDELIMITER ;\n\n-- Phase 4: Scheduled events (Event Scheduler — Lecture 6)\n-- event_scheduler=ON\
+    \ is enabled via docker-compose command flag (infra/docker-compose.yml).\nDELIMITER //\n\nCREATE EVENT IF NOT EXISTS evt_monthly_budget_snapshot\n\
+    ON SCHEDULE EVERY 1 MONTH\n    STARTS '2026-02-01 00:00:00'\nON COMPLETION PRESERVE\nENABLE\nDO\nBEGIN\n    DECLARE done\
+    \  INT DEFAULT 0;\n    DECLARE v_uid INT;\n\n    DECLARE cur CURSOR FOR SELECT id FROM users;\n    DECLARE CONTINUE HANDLER\
+    \ FOR NOT FOUND SET done = 1;\n\n    OPEN cur;\n    user_loop: LOOP\n        FETCH cur INTO v_uid;\n        IF done THEN\
+    \ LEAVE user_loop; END IF;\n        CALL usp_apply_budget_alert(v_uid);\n    END LOOP;\n    CLOSE cur;\nEND //\n\nCREATE\
+    \ EVENT IF NOT EXISTS evt_purge_old_alerts\nON SCHEDULE EVERY 1 WEEK\n    STARTS CURRENT_TIMESTAMP\nON COMPLETION PRESERVE\n\
+    ENABLE\nDO\n    DELETE FROM budget_alerts\n     WHERE triggered_at < DATE_SUB(NOW(), INTERVAL 12 MONTH) //\n\nDELIMITER\
+    \ ;\n\n"
+  02-seed.sql: '-- Seed data for docker-entrypoint-initdb.d
+
+
+    INSERT INTO users (display_name, email) VALUES
+
+    (''Alice Johnson'', ''alice@example.com''),
+
+    (''Bob Smith'',     ''bob@example.com'');
+
+
+    INSERT INTO categories (user_id, name, type) VALUES
+
+    (1, ''Salary'',        ''income''),
+
+    (1, ''Freelance'',     ''income''),
+
+    (1, ''Groceries'',     ''expense''),
+
+    (1, ''Rent'',          ''expense''),
+
+    (1, ''Entertainment'', ''expense'');
+
+
+    INSERT INTO categories (user_id, name, type) VALUES
+
+    (2, ''Salary'',          ''income''),
+
+    (2, ''Dining Out'',      ''expense''),
+
+    (2, ''Utilities'',       ''expense''),
+
+    (2, ''Transportation'',  ''expense'');
+
+
+    INSERT INTO transactions (user_id, category_id, amount, transaction_date, transaction_type, notes) VALUES
+
+    (1, 1, 4500.00, ''2026-01-01'', ''income'',  ''January salary''),
+
+    (1, 2,  800.00, ''2026-01-10'', ''income'',  ''Logo design project''),
+
+    (1, 3,  120.50, ''2026-01-05'', ''expense'', ''Weekly groceries''),
+
+    (1, 4, 1200.00, ''2026-01-01'', ''expense'', ''Monthly rent''),
+
+    (1, 5,   45.00, ''2026-01-15'', ''expense'', ''Movie tickets'');
+
+
+    INSERT INTO transactions (user_id, category_id, amount, transaction_date, transaction_type, notes) VALUES
+
+    (1, 1, 4500.00, ''2026-02-01'', ''income'',  ''February salary''),
+
+    (1, 3,  135.75, ''2026-02-07'', ''expense'', ''Weekly groceries''),
+
+    (1, 4, 1200.00, ''2026-02-01'', ''expense'', ''Monthly rent''),
+
+    (1, 5,   60.00, ''2026-02-20'', ''expense'', ''Concert tickets'');
+
+
+    INSERT INTO transactions (user_id, category_id, amount, transaction_date, transaction_type, notes) VALUES
+
+    (2, 6, 3800.00, ''2026-01-01'', ''income'',  ''January salary''),
+
+    (2, 7,   55.00, ''2026-01-08'', ''expense'', ''Dinner with friends''),
+
+    (2, 8,  150.00, ''2026-01-12'', ''expense'', ''Electric bill''),
+
+    (2, 9,   75.00, ''2026-01-20'', ''expense'', ''Gas and tolls'');
+
+
+    INSERT INTO transactions (user_id, category_id, amount, transaction_date, transaction_type, notes) VALUES
+
+    (2, 6, 3800.00, ''2026-02-01'', ''income'',  ''February salary''),
+
+    (2, 7,   40.00, ''2026-02-10'', ''expense'', ''Lunch out''),
+
+    (2, 8,  145.00, ''2026-02-14'', ''expense'', ''Electric bill''),
+
+    (2, 9,   80.00, ''2026-02-22'', ''expense'', ''Gas'');
+
+    '
+kind: ConfigMap
+metadata:
+  name: mysql-init
+  namespace: pf-tracker

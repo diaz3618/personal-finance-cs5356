@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  namespace: pf-tracker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pf-tracker-app
+  template:
+    metadata:
+      labels:
+        app: pf-tracker-app
+    spec:
+      containers:
+        - name: app
+          image: ghcr.io/OWNER/pf-tracker-app:latest
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secret
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
