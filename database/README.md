@@ -1,37 +1,35 @@
 # pf-tracker database
 
-MySQL 8.0 schema, seed data, and reporting queries for pf-tracker. The full
-deployment normally runs from the Compose stack at `infra/docker-compose.yml`;
-this directory holds the database artifacts that the `mysql` service mounts.
+This directory contains the MySQL 8.0 schema, seed data, and standalone report
+queries for `pf-tracker`. Docker Compose still builds the MySQL image from this
+directory, and the init scripts under `init/` are mounted directly on first
+startup.
 
 ## Layout
 
-```
+```text
 database/
-├── Dockerfile                  # builds an image that copies init/ into docker-entrypoint-initdb.d/
+├── Dockerfile
 ├── init/
-│   ├── 01-schema.sql           # tables, views, stored programs, triggers, events, grants
-│   └── 02-seed.sql             # demo users, categories, transactions, budgets
+│   ├── 01-schema.sql
+│   └── 02-seed.sql
 ├── queries/
-│   └── report_queries.sql      # standalone reporting queries
-└── docs/
-    ├── schema_notes.md         # table definitions, constraints, design rationale
-    ├── normalization.md        # FD analysis through BCNF for all six tables
-    ├── advanced-features.md    # stored programs, triggers, events, window queries
+│   └── report_queries.sql
+└── ../docs/
+    ├── system-overview.md
+    ├── data-model.md
+    ├── database-workflows.md
     └── diagrams/
-        ├── er_diagram.md
-        └── eer_diagram.md
 ```
 
-The Dockerfile copies the contents of `init/` into MySQL's
-`docker-entrypoint-initdb.d/`, so the schema and seed run automatically on first
-container start. Subsequent restarts skip initialization unless the data volume
-is destroyed.
+The Dockerfile copies `init/` into MySQL's `docker-entrypoint-initdb.d/`, so
+the schema and seed run on the first container start. Later restarts skip that
+initialization unless the data volume is removed.
 
 ## Running standalone
 
-The intended path is `cd infra && docker compose up -d`, which brings up MySQL
-with the rest of the stack. To run only this image directly:
+The usual path is `cd infra && docker compose up -d`, which starts MySQL with
+the rest of the stack. To run only this image directly:
 
 ```bash
 docker build -t pf-tracker-db .
@@ -41,34 +39,38 @@ docker run --rm -p 3306:3306 \
   pf-tracker-db
 ```
 
-Then connect with any MySQL 8 client at `127.0.0.1:3306` as `root` / `rootpass`.
+Then connect with any MySQL 8 client at `127.0.0.1:3306` as `root`.
 
 ## Schema overview
 
-Six base tables: `users`, `categories`, `transactions`, `budgets`,
-`budget_alerts`, `transaction_audit_log`. Four security-definer views:
-`v_user_transactions`, `v_user_categories`, `v_user_budgets`,
-`v_transaction_detail`. The application connects as the `app_user` role and
-sets `@current_user_id` per request; the views filter on
+The schema centers on six base tables: `users`, `categories`, `transactions`,
+`budgets`, `budget_alerts`, and `transaction_audit_log`. It also exposes four
+security-definer views: `v_user_transactions`, `v_user_categories`,
+`v_user_budgets`, and `v_transaction_detail`. The application connects as
+`app_user` and sets `@current_user_id` per request; the views filter on
 `current_app_user_id()` to enforce row-level isolation.
 
-See [docs/schema_notes.md](docs/schema_notes.md) for the table-by-table
-definition and [docs/normalization.md](docs/normalization.md) for the BCNF
-analysis (including two documented denormalizations).
+The project-facing writeups live in `../docs/`:
+
+- [`docs/system-overview.md`](../docs/system-overview.md)
+- [`docs/data-model.md`](../docs/data-model.md)
+- [`docs/database-workflows.md`](../docs/database-workflows.md)
+- [`docs/diagrams/`](../docs/diagrams/)
 
 ## Reporting queries
 
-`queries/report_queries.sql` contains five reporting queries that are also
-exposed through the API:
+`queries/report_queries.sql` keeps a few standalone queries that match the
+current schema:
 
-| # | Query                          | What it returns                                   |
-|---|--------------------------------|---------------------------------------------------|
-| 1 | Monthly Expense Totals         | Total expenses per year-month                     |
-| 2 | Monthly Income Totals          | Total income per year-month                       |
-| 3 | Spending by Category           | Total spent per expense category, descending      |
-| 4 | Income vs Expense by Month     | Income, expenses, and net savings side by side    |
-| 5 | User Transactions by Date      | All transactions for a given user, chronological  |
+| # | Query | What it returns |
+|---|-------|-----------------|
+| 1 | Monthly Expense Totals | Total expenses per year-month |
+| 2 | Monthly Income Totals | Total income per year-month |
+| 3 | Spending by Category | Total spent per expense category for one user |
+| 4 | Income vs Expense by Month | Income, expenses, and net balance side by side |
+| 5 | User Transactions by Date | User transactions joined with category names |
 
-Query 5 reads `@target_user_id`; set it before running. The `usp_monthly_summary`
-stored procedure wraps query 4 with a cursor-based per-category breakdown — see
-[docs/advanced-features.md](docs/advanced-features.md).
+Queries 3 and 5 read `@target_user_id`; set it before running them. The
+application's monthly reporting path is handled by `usp_monthly_summary`, and
+[`docs/database-workflows.md`](../docs/database-workflows.md) covers the stored
+procedures, triggers, views, and events in more detail.

@@ -133,8 +133,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (init) init();
 });
 
-// --- Dashboard --------------------------------------------------------------
-
 async function initDashboard() {
   const balanceEl = document.getElementById('net-balance');
   const chartEl = document.getElementById('monthly-chart');
@@ -173,7 +171,7 @@ async function initDashboard() {
       });
     }
   } catch {
-    // chart is non-critical
+    // Leave the page usable even when the chart script fails to load.
   }
 
   try {
@@ -220,8 +218,6 @@ async function initDashboard() {
     }
   }
 }
-
-// --- Transactions -----------------------------------------------------------
 
 async function initTransactions() {
   const txList = document.getElementById('transaction-list');
@@ -509,8 +505,6 @@ async function initTransactions() {
   renderPage();
 }
 
-// --- Categories -------------------------------------------------------------
-
 async function initCategories() {
   const form = document.getElementById('category-form');
   const list = document.getElementById('category-list');
@@ -667,8 +661,6 @@ async function initCategories() {
   }
 }
 
-// --- Budgets ----------------------------------------------------------------
-
 async function initBudgets() {
   const monthSelect = document.getElementById('month-select');
   const budgetBody = document.getElementById('budget-body');
@@ -809,8 +801,6 @@ async function initBudgets() {
   await loadBudgets();
 }
 
-// --- Reports ----------------------------------------------------------------
-
 async function initReports() {
   const monthInput = document.getElementById('report-month');
   const monthlyChartEl = document.getElementById('monthly-chart-canvas');
@@ -942,8 +932,6 @@ async function initReports() {
   renderReports();
 }
 
-// --- Profile ----------------------------------------------------------------
-
 async function initProfile() {
   const profileInfo = document.getElementById('profile-info');
   const exportBtn = document.getElementById('export-btn');
@@ -1000,4 +988,3 @@ async function initProfile() {
     });
   }
 }
-

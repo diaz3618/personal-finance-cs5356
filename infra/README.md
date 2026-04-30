@@ -1,40 +1,36 @@
 # infra
 
-Deployment configurations for pf-tracker. Three modes are supported: Docker Compose (development and local), Kubernetes with nginx-ingress (vanilla K8s), and K3s with Kustomize (edge/lightweight K3s clusters).
-
----
+This directory holds the active deployment assets for pf-tracker. The supported
+paths are Docker Compose for local work and Kubernetes for cluster-style
+deployments.
 
 ## Docker Compose
 
-**Prerequisites**
-
-- Docker Engine and Docker Compose v2 (`docker compose` subcommand)
-- A `.env` file at the project root — copy `.env.example` and fill in real values:
+Docker Compose expects a project-root `.env` file:
 
 ```sh
 cp ../.env.example ../.env
 ```
 
-**Start**
-
-Run from the `infra/` directory:
+Run from `infra/`:
 
 ```sh
 docker compose up --build
 ```
 
-This starts four services:
+That starts four services:
 
 | Service | Role |
 |---------|------|
 | `mysql` | MySQL 8.0, persistent volume, event scheduler enabled |
-| `redis` | Redis 7, in-memory cache for resolved Clerk user IDs |
-| `app` | Node.js/Express application server on port 3000 (internal only) |
-| `nginx` | Reverse proxy and static file server, exposed on port 80 |
+| `redis` | Redis 7, cache for resolved Clerk user IDs |
+| `app` | Node.js/Express application server on port 3000 |
+| `nginx` | Reverse proxy and static file server on port 80 |
 
-Port 80 is the public entry point. Port 3306 is bound to localhost only for direct DB access during development.
-
-**ngrok overlay (webhook dev)**
+Port 80 is the public entry point. Port 3306 is bound to localhost for direct
+database access during development. The current project docs live in
+`../docs/`, including the deployment and auth/RLS diagrams under
+`../docs/diagrams/`.
 
 To expose port 80 through a public tunnel for Clerk webhook delivery:
 
@@ -42,61 +38,37 @@ To expose port 80 through a public tunnel for Clerk webhook delivery:
 docker compose -f docker-compose.yml -f docker-compose.ngrok.yml up -d
 ```
 
-Requires `NGROK_AUTHTOKEN` in `.env` (get from https://dashboard.ngrok.com/authtokens). The tunnel URL appears at http://localhost:4040 and in the ngrok container logs. Register it as a Clerk webhook endpoint: `https://<tunnel-id>.ngrok.io/api/webhooks/clerk` with events `user.created` and `user.deleted`, then set `CLERK_WEBHOOK_SECRET` in `.env` and restart the app container.
-
----
+That overlay needs `NGROK_AUTHTOKEN` in `.env`
+(https://dashboard.ngrok.com/authtokens). The tunnel URL appears at
+http://localhost:4040 and in the ngrok container logs. Register that URL as a
+Clerk webhook endpoint for `user.created` and `user.deleted`, then set
+`CLERK_WEBHOOK_SECRET` in `.env` and restart the app container.
 
 ## Kubernetes
 
-**Prerequisites**
+The manifests under `infra/k8s/` assume:
 
-- `kubectl` configured against a running cluster
-- An nginx-ingress controller deployed in the cluster
-- A StorageClass named `standard` for MySQL persistent storage
+- `kubectl` is pointed at a running cluster
+- an nginx ingress controller is installed
+- a StorageClass named `standard` exists
 
-**Prepare secrets**
+All `**/secret.yaml` files ship with placeholder base64 values. Replace them
+before applying the manifests. On a shared or long-lived cluster, Sealed
+Secrets are a better fit than raw committed secrets.
 
-All `**/secret.yaml` files contain placeholder base64 values. Replace them with real credentials encoded in base64 before applying. For production clusters, use [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) to encrypt secrets before committing.
-
-Replace `OWNER` in `app/deployment.yaml` and `nginx/deployment.yaml` image references with your GitHub username (GHCR images are at `ghcr.io/OWNER/pf-tracker-*`).
-
-**Apply**
+Apply the stack with:
 
 ```sh
-kubectl apply -f infra/k8s/
+kubectl apply -k infra/k8s/
 ```
 
-**Verify**
+Verify it with:
 
 ```sh
 kubectl get pods -n pf-tracker
 kubectl get ingress -n pf-tracker
 ```
 
----
-
-## K3s
-
-**Prerequisites**
-
-- A running K3s cluster — Traefik ingress controller and `local-path` StorageClass are built in by default
-
-**K3s differences from vanilla K8s**
-
-K3s ships with Traefik instead of nginx-ingress and uses `local-path` as the default StorageClass instead of `standard`. The Kustomize overlay in `infra/k3s/` patches both differences automatically — no manual file edits needed.
-
-**Apply base stack**
-
-```sh
-kubectl apply -k infra/k3s/
-```
-
-**ngrok overlay**
-
-For webhook development on K3s:
-
-```sh
-kubectl apply -k infra/k3s/ngrok/
-```
-
-This applies the same K3s patches (Traefik ingress class, local-path storage) and includes the ngrok Deployment and its Secret. Set the ngrok auth token in `infra/k8s/ngrok/secret.yaml` before applying.
+The Kustomization includes the namespace, ingress, MySQL, Redis, app, Nginx,
+and ngrok resources that ship with the repo. Replace the placeholder secrets
+before using these manifests outside a local test cluster.

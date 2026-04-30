@@ -1,5 +1,3 @@
--- Runs from docker-entrypoint-initdb.d; database name set by MYSQL_DATABASE
-
 CREATE TABLE users (
     id              INT             NOT NULL AUTO_INCREMENT,
     clerk_user_id   VARCHAR(255)    NULL,
@@ -162,13 +160,11 @@ END //
 
 DELIMITER ;
 
--- RLS: restricted application account
 CREATE USER IF NOT EXISTS 'app_user'@'%' IDENTIFIED BY 'pf_app_2026';
 REVOKE ALL PRIVILEGES, GRANT OPTION FROM 'app_user'@'%';
 
--- Helper function: MySQL views cannot reference session variables directly (ERROR 1351).
--- This wrapper function is SECURITY DEFINER so that app_user (which executes the views)
--- can call it even though it has no direct access to @current_user_id as a raw expression.
+-- Views cannot reference session variables directly, so this wrapper exposes
+-- @current_user_id to the security-definer views that app_user can read.
 CREATE DEFINER=`root`@`localhost` FUNCTION current_app_user_id()
   RETURNS INT
   NOT DETERMINISTIC
@@ -176,7 +172,6 @@ CREATE DEFINER=`root`@`localhost` FUNCTION current_app_user_id()
   SQL SECURITY DEFINER
 RETURN @current_user_id;
 
--- Security-definer views for row-level isolation via current_app_user_id() session function
 CREATE OR REPLACE DEFINER=`root`@`localhost` SQL SECURITY DEFINER
 VIEW v_user_transactions AS
 SELECT id, user_id, category_id, amount, transaction_type, transaction_date, notes, created_at
@@ -217,22 +212,19 @@ SELECT t.id AS transaction_id, t.user_id,
   JOIN categories c ON c.id = t.category_id
   JOIN users      u ON u.id = t.user_id;
 
--- Grants: app_user reads/writes through views; direct table grants only where view is non-updatable
 GRANT SELECT ON personal_finance.v_user_transactions   TO 'app_user'@'%';
 GRANT SELECT ON personal_finance.v_user_categories     TO 'app_user'@'%';
 GRANT SELECT ON personal_finance.v_user_budgets        TO 'app_user'@'%';
 GRANT SELECT ON personal_finance.v_transaction_detail  TO 'app_user'@'%';
 GRANT INSERT, UPDATE, DELETE ON personal_finance.v_user_transactions TO 'app_user'@'%';
 GRANT INSERT, UPDATE, DELETE ON personal_finance.v_user_categories   TO 'app_user'@'%';
--- v_user_budgets is a join/aggregate view (non-updatable); grant direct table access for writes
+-- v_user_budgets joins and aggregates, so writes still target budgets directly.
 GRANT INSERT, UPDATE, DELETE ON personal_finance.budgets             TO 'app_user'@'%';
--- Schema-wide EXECUTE covers both stored procedures and functions in MySQL.
--- The PROCEDURE/FUNCTION keyword on GRANT applies only to specific routine names.
+-- Schema-wide EXECUTE covers both procedures and functions in MySQL.
 GRANT EXECUTE ON personal_finance.* TO 'app_user'@'%';
 
 FLUSH PRIVILEGES;
 
--- Stored procedures
 DELIMITER //
 
 CREATE DEFINER=`root`@`localhost` PROCEDURE usp_monthly_summary(
@@ -388,7 +380,6 @@ END //
 
 DELIMITER ;
 
--- Stored functions
 DELIMITER //
 
 CREATE DEFINER=`root`@`localhost` FUNCTION fn_net_balance(p_user_id INT)
@@ -422,8 +413,6 @@ RETURN DATEDIFF(p_end_date, p_start_date) + 1 //
 
 DELIMITER ;
 
--- Audit trigger fires AFTER INSERT/UPDATE and BEFORE DELETE on transactions.
--- MySQL requires one trigger per event type; all three write to transaction_audit_log.
 DELIMITER //
 
 CREATE TRIGGER trg_log_tx_changes_insert
@@ -446,9 +435,7 @@ BEGIN
         (NEW.id, 'UPDATE', OLD.amount, NEW.amount, NEW.user_id);
 END //
 
--- BEFORE DELETE so the parent row still exists when the audit row is inserted;
--- the FK on transaction_audit_log.transaction_id (ON DELETE SET NULL) then nulls
--- the just-inserted audit row's transaction_id once the actual DELETE completes.
+-- BEFORE DELETE keeps the source values available for the audit row.
 CREATE TRIGGER trg_log_tx_changes_delete
 BEFORE DELETE ON transactions
 FOR EACH ROW
@@ -461,8 +448,6 @@ END //
 
 DELIMITER ;
 
--- Scheduled events.
--- event_scheduler=ON is enabled via docker-compose command flag (infra/docker-compose.yml).
 DELIMITER //
 
 CREATE EVENT IF NOT EXISTS evt_monthly_budget_snapshot
@@ -497,4 +482,3 @@ DO
      WHERE triggered_at < DATE_SUB(NOW(), INTERVAL 12 MONTH) //
 
 DELIMITER ;
-

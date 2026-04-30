@@ -1,49 +1,39 @@
 # pf-tracker
 
-A personal finance tracker built around a MySQL 8.0 schema that exercises the full
-range of CS 5356 coursework — stored procedures, functions, triggers, scheduled events,
-window functions, CTEs, security-definer views, and per-connection row-level security.
-The web app exists so every database object can be reached through a real request path
-instead of an isolated `CALL` from a SQL client.
+`pf-tracker` is a personal finance app built around a MySQL 8.0 schema. The
+browser and API are deliberately small. Most of the rules that matter live in
+the database: row-scoped views, stored procedures, functions, triggers,
+scheduled events, window queries, and CTE-based reports.
 
 ## Prerequisites
 
-- Node.js 22 or newer (the app and the MCP tooling assume Node 22 features)
+- Node.js 22 or newer
 - Docker and Docker Compose v2
-- A Clerk account with `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, and
-  `CLERK_WEBHOOK_SECRET` available
-- MySQL 8.0 ships inside the Compose stack — no host install needed
+- A Clerk application with `CLERK_SECRET_KEY`,
+  `CLERK_PUBLISHABLE_KEY`, and `CLERK_WEBHOOK_SECRET`
+- No host MySQL install is required; the stack runs MySQL in Docker
 
 ## Local Setup
 
-```
-git clone https://github.com/<owner>/personal-finance-cs5356
-cp .env.example .env       # fill in Clerk keys and (optional) ngrok values
+```bash
+git clone https://github.com/diaz3618/personal-finance-cs5356
+cp .env.example .env
 cd infra
 docker compose up --build
 ```
 
-The Nginx proxy listens on `http://localhost`. The Node app is also exposed directly
-on `http://localhost:3010` for debugging. MySQL is reachable from the host on `3307`
-and Redis on `6380` (the non-default ports avoid collisions with anything already
-running locally).
+Fill in the Clerk values in `.env` before starting the stack. The app is
+available at `http://localhost`. MySQL is exposed on `localhost:3306`. Redis is
+kept inside the Compose network.
 
-## Architecture
+## Runtime Shape
 
-The Compose stack runs four services. Nginx terminates every browser request, serves
-the static assets in `app/public/` directly, and reverse-proxies `/api/*` to the
-Node.js + Express 5 application on port 3000. The Node tier holds no business logic
-in code that the database can express on its own — it validates input, opens a pooled
-MySQL connection as the unprivileged `app_user` (which has no direct table grants),
-sets `@current_user_id` on the connection, and either calls a stored program or
-selects from a security-definer view. The MySQL 8.0 service owns the
-`personal_finance` schema; every read-side query goes through a view that filters
-rows by `@current_user_id`, and every multi-step write goes through a stored
-procedure that wraps its work in `START TRANSACTION` / `COMMIT` / `ROLLBACK`. Redis 7
-caches the Clerk-user-id-to-internal-id lookup so the auth middleware does not hit
-MySQL on every request. Clerk verifies the JWT on each `/api/*` route, and a separate
-Svix-signed webhook endpoint syncs `user.created` and `user.deleted` events into the
-`users` table.
+Nginx is the public entry point. It serves `app/public/` and forwards `/api/*`
+to Express on port 3000. The app verifies Clerk sessions, resolves the local
+user row, sets `@current_user_id` on the MySQL session, and then hands the data
+work to views, functions, or procedures in `personal_finance`. Redis caches the
+Clerk-user-id to local-user-id mapping so the auth path does not repeat the
+same lookup on every request.
 
 ## API Reference
 
@@ -60,9 +50,9 @@ Svix-signed webhook endpoint syncs `user.created` and `user.deleted` events into
 | GET    | /api/transactions             | JWT | Reads `v_user_transactions` joined with `v_user_categories` |
 | POST   | /api/transactions             | JWT | Insert through `v_user_transactions`; `trg_check_type_match_insert` fires |
 | PUT    | /api/transactions/:id         | JWT | Update through `v_user_transactions`; `trg_check_type_match_update` fires |
-| PUT    | /api/transactions/:id/category| JWT | Calls `usp_transfer_category()` — type check, transactional |
+| PUT    | /api/transactions/:id/category| JWT | Calls `usp_transfer_category()` |
 | DELETE | /api/transactions/:id         | JWT | Delete through `v_user_transactions`; `trg_log_tx_changes_delete` fires |
-| GET    | /api/reports/monthly          | JWT | Calls `usp_monthly_summary()` — explicit cursor and SQLEXCEPTION handler |
+| GET    | /api/reports/monthly          | JWT | Calls `usp_monthly_summary()` |
 | GET    | /api/reports/by-category      | JWT | Aggregation over `v_user_transactions` joined with `v_user_categories` |
 | GET    | /api/reports/category-rank    | JWT | `RANK() OVER (ORDER BY SUM(amount) DESC)` window |
 | GET    | /api/export/transactions      | JWT | CTE-based query streamed as CSV |
@@ -75,33 +65,43 @@ Svix-signed webhook endpoint syncs `user.created` and `user.deleted` events into
 
 ### Stored Programs
 
-| Object | Type | Course Topic | Description |
-|--------|------|--------------|-------------|
-| `usp_monthly_summary`            | Procedure | Cursors, exception handling | Aggregates income and expense per category for a given user, year, and month using an explicit cursor with a `DECLARE HANDLER FOR SQLEXCEPTION` block |
-| `usp_apply_budget_alert`         | Procedure | Transactions, savepoints | Compares actual spend to each budget limit and writes into `budget_alerts`; uses `SAVEPOINT sp_budget_check` so a single bad row does not abort the batch |
-| `usp_transfer_category`          | Procedure | Transactions, `SIGNAL` | Re-categorizes a transaction; validates that the target category type matches and raises `SIGNAL SQLSTATE '45000'` on mismatch; wraps the work in an explicit transaction |
-| `fn_net_balance`                 | Function  | Stored functions | Returns a `DECIMAL(10,2)` net balance (income minus expense) for a user |
-| `fn_days_in_period`              | Function  | Stored functions, date arithmetic | Returns the inclusive day count between two dates |
-| `current_app_user_id`            | Function  | Session state | Reads `@current_user_id` and is used by the security-definer views to filter rows |
-| `trg_check_type_match_insert`    | Trigger   | Triggers | `BEFORE INSERT` on `transactions` — rejects rows whose type does not match the parent category type |
-| `trg_check_type_match_update`    | Trigger   | Triggers | `BEFORE UPDATE` on `transactions` — same check on the post-update row |
-| `trg_log_tx_changes_insert`      | Trigger   | Triggers, audit trail | `AFTER INSERT` on `transactions` — writes an `INSERT` row to `transaction_audit_log` |
-| `trg_log_tx_changes_update`      | Trigger   | Triggers, audit trail | `AFTER UPDATE` on `transactions` — writes an `UPDATE` row capturing old and new values |
-| `trg_log_tx_changes_delete`      | Trigger   | Triggers, audit trail | `BEFORE DELETE` on `transactions` — captures the row in `transaction_audit_log` before it disappears |
-| `evt_monthly_budget_snapshot`    | Event     | Event scheduler | Runs monthly; calls `usp_apply_budget_alert` for every user |
-| `evt_purge_old_alerts`           | Event     | Event scheduler | Runs weekly; deletes `budget_alerts` rows older than twelve months |
+| Object | Type | Description |
+|--------|------|-------------|
+| `usp_monthly_summary`         | Procedure | Returns a per-category monthly rollup for one user |
+| `usp_apply_budget_alert`      | Procedure | Writes over-budget snapshots into `budget_alerts` |
+| `usp_transfer_category`       | Procedure | Moves a transaction to a category of the same type |
+| `fn_net_balance`              | Function  | Returns income minus expenses for one user |
+| `fn_days_in_period`           | Function  | Returns the inclusive day count between two dates |
+| `current_app_user_id`         | Function  | Exposes `@current_user_id` to the row-scoped views |
+| `trg_check_type_match_insert` | Trigger   | Rejects inserts whose type disagrees with the category |
+| `trg_check_type_match_update` | Trigger   | Rejects updates whose type disagrees with the category |
+| `trg_log_tx_changes_insert`   | Trigger   | Records inserts in `transaction_audit_log` |
+| `trg_log_tx_changes_update`   | Trigger   | Records updates in `transaction_audit_log` |
+| `trg_log_tx_changes_delete`   | Trigger   | Records deletes in `transaction_audit_log` |
+| `evt_monthly_budget_snapshot` | Event     | Runs the monthly budget alert pass |
+| `evt_purge_old_alerts`        | Event     | Removes stale alert rows |
 
 ### Security-Definer Views
 
-Every view runs with `DEFINER` privileges and filters its rows through
-`current_app_user_id()`, which reads the per-connection `@current_user_id` session
-variable set by the application middleware. The `app_user` MySQL account has no
-direct grants on the underlying tables — it can only reach data through these views
-and through the stored programs above.
+The `app_user` account does not read the base tables directly. It works through
+`DEFINER` views and stored programs. Row filtering comes from
+`current_app_user_id()`, which reads the `@current_user_id` value set by the
+application middleware on the current connection.
 
-| View                  | Filters By              | Purpose |
-|-----------------------|-------------------------|---------|
-| `v_user_transactions` | `@current_user_id`      | Transactions for the authenticated user only |
-| `v_user_categories`   | `@current_user_id`      | Categories for the authenticated user only |
-| `v_user_budgets`      | `@current_user_id`      | Budgets joined with category name and the running actual spend |
-| `v_transaction_detail`| `@current_user_id`      | Transactions joined with category and user, used by report queries |
+| View                  | Filters By         | Purpose |
+|-----------------------|--------------------|---------|
+| `v_user_transactions` | `@current_user_id` | Transactions for the authenticated user |
+| `v_user_categories`   | `@current_user_id` | Categories for the authenticated user |
+| `v_user_budgets`      | `@current_user_id` | Budgets with category names and actual spend |
+| `v_transaction_detail`| joined helper view | Report-oriented join across users, categories, and transactions |
+
+## Documentation
+
+The current project docs live under `docs/`:
+
+- `docs/system-overview.md`
+- `docs/data-model.md`
+- `docs/database-workflows.md`
+- `docs/diagrams/`
+
+Repository URL: `https://github.com/diaz3618/personal-finance-cs5356`

@@ -1,16 +1,6 @@
 # Overlay for local webhook development via ngrok.
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.ngrok.yml up -d
-#
-# Set NGROK_AUTHTOKEN in .env (get from https://dashboard.ngrok.com/authtokens).
-# After startup, the tunnel URL is visible at http://localhost:4040 or via:
-#   docker logs infra-ngrok-1
-#
-# Register the tunnel URL as a Clerk webhook endpoint:
-#   https://dashboard.clerk.com → Webhooks → Add Endpoint
-#   URL: https://<tunnel-id>.ngrok.io/api/webhooks/clerk
-#   Events: user.created, user.deleted
-#   Copy the Signing Secret → set CLERK_WEBHOOK_SECRET in .env → restart app.
 
 services:
   ngrok:

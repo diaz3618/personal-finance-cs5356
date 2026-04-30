@@ -1,9 +1,8 @@
-# Replace OWNER with your GitHub username (github.com/OWNER).
 # Images pull from GHCR when available; local build is the fallback.
 
 services:
   mysql:
-    image: ghcr.io/OWNER/pf-tracker-mysql:latest
+    image: ghcr.io/diaz3618/pf-tracker-mysql:latest
     build:
       context: ../database
     command: --event_scheduler=ON
@@ -35,7 +34,7 @@ services:
       retries: 5
 
   app:
-    image: ghcr.io/OWNER/pf-tracker-app:latest
+    image: ghcr.io/diaz3618/pf-tracker-app:latest
     build:
       context: ../app
     restart: unless-stopped

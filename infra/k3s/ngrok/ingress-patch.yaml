@@ -1,7 +1,0 @@
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: pf-tracker
-  namespace: pf-tracker
-  annotations:
-    kubernetes.io/ingress.class: traefik

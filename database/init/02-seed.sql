@@ -1,5 +1,3 @@
--- Seed data for docker-entrypoint-initdb.d
-
 INSERT INTO users (display_name, email) VALUES
 ('Alice Johnson', 'alice@example.com'),
 ('Bob Smith',     'bob@example.com');

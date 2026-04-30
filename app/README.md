@@ -1,65 +1,73 @@
 # pf-tracker
 
-Personal finance tracker — records income and expense transactions by category, with monthly and by-category reports.
+This directory contains the web application runtime. `server.js` serves the
+static frontend, validates Clerk sessions, resolves the local `users.id`, sets
+`@current_user_id` on each MySQL session, and hands reads or writes off to the
+database layer.
 
-**Stack:** HTML/CSS/JS frontend · Node.js + Express · MySQL 8.0 · Clerk authentication
+**Stack:** HTML/CSS/JS frontend, Node.js + Express, MySQL 8.0, Clerk
+authentication
 
 ## Prerequisites
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine + Compose
-- A [Clerk](https://clerk.com) account with a new application created
+- Docker Engine with Compose or Docker Desktop
+- A Clerk application
 
 ## Setup
 
-### 1. Configure environment variables
+### Environment
 
-From the project root (not this directory):
+Use the project root `.env` file, not an app-local one:
 
 ```bash
 cp .env.example .env
 ```
 
-Fill in the four Clerk values in `.env`:
+Set these values in `.env`:
 
 | Variable | Where to find it |
-|----------|-----------------|
-| `CLERK_PUBLISHABLE_KEY` | Clerk Dashboard → API Keys |
-| `CLERK_SECRET_KEY` | Clerk Dashboard → API Keys |
-| `CLERK_WEBHOOK_SECRET` | Clerk Dashboard → Webhooks → your endpoint → Signing Secret |
-| `FRONTEND_URL` | Leave as `http://localhost:3010` for local dev |
+|----------|------------------|
+| `CLERK_PUBLISHABLE_KEY` | Clerk Dashboard -> API Keys |
+| `CLERK_SECRET_KEY` | Clerk Dashboard -> API Keys |
+| `CLERK_WEBHOOK_SECRET` | Clerk Dashboard -> Webhooks -> endpoint -> Signing Secret |
+| `FRONTEND_URL` | Optional override for direct API access from a different browser origin |
 
-### 2. Register the webhook endpoint in Clerk
+### Clerk webhook
 
-In the Clerk Dashboard, go to **Webhooks → Add Endpoint**:
+In the Clerk Dashboard, add a webhook endpoint:
 
 - URL: `https://your-tunnel-or-domain/api/webhooks/clerk`
-- Subscribe to events: `user.created`, `user.deleted`
-- Copy the **Signing Secret** into `CLERK_WEBHOOK_SECRET` in your `.env`
+- Events: `user.created`, `user.deleted`
+- Copy the signing secret into `CLERK_WEBHOOK_SECRET`
 
-For local development, use [ngrok](https://ngrok.com) or [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) to expose port 3010.
+For local webhook testing, expose port 80 with
+[ngrok](https://ngrok.com) or
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/).
 
-### 3. Start the stack
+### Start the stack
 
 ```bash
 docker compose -f infra/docker-compose.yml up -d
 ```
 
-The app is available at [http://localhost:3010](http://localhost:3010).
+The browser entry point is [http://localhost](http://localhost). Nginx proxies
+`/api/*` to the Node process on port 3000 inside the Compose network.
 
-### 4. Rebuilding after schema changes
+### Rebuild after schema changes
 
-If `database/init/01-schema.sql` changes, the MySQL volume must be destroyed and recreated:
+If `database/init/01-schema.sql` changes, rebuild from a clean MySQL volume:
 
 ```bash
 docker compose -f infra/docker-compose.yml down -v
 docker compose -f infra/docker-compose.yml up -d
 ```
 
-This erases all data. Re-seed by re-running `database/init/02-seed.sql` via the MySQL client or a volume init script.
+This wipes the local data set. Re-seed with `database/init/02-seed.sql`.
 
 ## Development
 
-Run the app directly (requires local MySQL):
+Run the app directly when you need to debug the Express process outside
+Compose:
 
 ```bash
 cd app
@@ -84,3 +92,11 @@ node server.js
 | GET | `/api/auth/me` | Yes |
 | POST | `/api/webhooks/clerk` | Svix signature |
 | GET | `/config.js` | No |
+
+## Related docs
+
+- [`../README.md`](../README.md)
+- [`../docs/system-overview.md`](../docs/system-overview.md)
+- [`../docs/data-model.md`](../docs/data-model.md)
+- [`../docs/database-workflows.md`](../docs/database-workflows.md)
+- Repository: `https://github.com/diaz3618/personal-finance-cs5356`

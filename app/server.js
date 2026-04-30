@@ -25,7 +25,7 @@ if (!process.env.CLERK_WEBHOOK_SECRET) {
 
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:3010' }));
 
-// webhookHandler defined below — registered here so express.raw() runs before express.json()
+// Register this before express.json() so Svix can verify the raw payload.
 const webhookHandler = async (req, res) => {
   if (!process.env.CLERK_WEBHOOK_SECRET) {
     return res.status(503).json({ error: 'Webhook not configured' });
@@ -155,8 +155,6 @@ app.get('/api/auth/me', async (req, res) => {
   }
 });
 
-// --- Dashboard --------------------------------------------------------------
-
 app.get('/api/dashboard/summary', async (req, res) => {
   const now       = new Date();
   const year      = now.getFullYear();
@@ -209,8 +207,6 @@ app.get('/api/dashboard/running-balance', async (req, res) => {
     res.status(500).json({ error: 'Failed to load running balance.' });
   }
 });
-
-// --- Categories -------------------------------------------------------------
 
 app.get('/api/categories', async (req, res) => {
   try {
@@ -285,8 +281,6 @@ app.delete('/api/categories/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete category.' });
   }
 });
-
-// --- Transactions -----------------------------------------------------------
 
 app.get('/api/transactions', async (req, res) => {
   try {
@@ -395,8 +389,6 @@ app.delete('/api/transactions/:id', async (req, res) => {
   }
 });
 
-// --- Reports ----------------------------------------------------------------
-
 app.get('/api/reports/monthly', async (req, res) => {
   const year  = parseInt(req.query.year  ?? new Date().getFullYear(),  10);
   const month = parseInt(req.query.month ?? (new Date().getMonth() + 1), 10);
@@ -463,8 +455,6 @@ app.get('/api/reports/category-rank', async (req, res) => {
   }
 });
 
-// --- Export -----------------------------------------------------------------
-
 app.get('/api/export/transactions', async (req, res) => {
   try {
     const [rows] = await req.conn.execute(
@@ -505,8 +495,6 @@ app.get('/api/export/transactions', async (req, res) => {
     res.status(500).json({ error: 'Failed to export transactions.' });
   }
 });
-
-// --- Budgets ----------------------------------------------------------------
 
 app.get('/api/budgets', async (req, res) => {
   try {
