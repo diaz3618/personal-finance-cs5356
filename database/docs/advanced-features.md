@@ -2,21 +2,21 @@
 
 ## Object Map
 
-| Object | Type | Course topic | Lecture | API endpoint |
-|--------|------|--------------|---------|--------------|
-| usp_monthly_summary | Stored procedure | Cursors, CONTINUE HANDLER FOR SQLEXCEPTION | Lecture 6 | GET /api/reports/monthly |
-| usp_apply_budget_alert | Stored procedure | SAVEPOINT, partial rollback, cursor loop | Lecture 6 | Called by evt_monthly_budget_snapshot; no direct HTTP route |
-| usp_transfer_category | Stored procedure | Explicit transaction, COMMIT/ROLLBACK, SIGNAL SQLSTATE | Lecture 6 | PUT /api/transactions/:id/category |
-| fn_net_balance | Function | Stored functions, READS SQL DATA | Lecture 6 | GET /api/dashboard/summary |
-| fn_days_in_period | Function | Stored functions, DETERMINISTIC, DATEDIFF | Lecture 6 | GET /api/dashboard/summary |
-| trg_log_tx_changes_insert | Trigger | AFTER INSERT, audit logging | Lecture 6 | Fires on POST /api/transactions |
-| trg_log_tx_changes_update | Trigger | AFTER UPDATE, OLD/NEW pseudo-rows | Lecture 6 | Fires on PUT /api/transactions/:id |
-| trg_log_tx_changes_delete | Trigger | AFTER DELETE, audit trail | Lecture 6 | Fires on DELETE /api/transactions/:id |
-| evt_monthly_budget_snapshot | Event | Event Scheduler, EVERY 1 MONTH | Lecture 6 | Runs automatically; calls usp_apply_budget_alert |
-| evt_purge_old_alerts | Event | Event Scheduler, archival DELETE | Lecture 6 | Runs automatically; purges budget_alerts > 12 months |
-| running-balance query | Window function | SUM() OVER (ORDER BY ...) | Lecture 7 | GET /api/dashboard/running-balance |
-| category-rank query | Window function | RANK() OVER (ORDER BY SUM() DESC) | Lecture 7 | GET /api/reports/category-rank |
-| export CTE | Common Table Expression | WITH ... AS (...) SELECT | Lecture 7 | GET /api/export/transactions |
+| Object | Type | Course topic | API endpoint |
+|--------|------|--------------|--------------|
+| usp_monthly_summary | Stored procedure | Cursors, CONTINUE HANDLER FOR SQLEXCEPTION | GET /api/reports/monthly |
+| usp_apply_budget_alert | Stored procedure | SAVEPOINT, partial rollback, cursor loop | Called by evt_monthly_budget_snapshot; no direct HTTP route |
+| usp_transfer_category | Stored procedure | Explicit transaction, COMMIT/ROLLBACK, SIGNAL SQLSTATE | PUT /api/transactions/:id/category |
+| fn_net_balance | Function | Stored functions, READS SQL DATA | GET /api/dashboard/summary |
+| fn_days_in_period | Function | Stored functions, DETERMINISTIC, DATEDIFF | GET /api/dashboard/summary |
+| trg_log_tx_changes_insert | Trigger | AFTER INSERT, audit logging | Fires on POST /api/transactions |
+| trg_log_tx_changes_update | Trigger | AFTER UPDATE, OLD/NEW pseudo-rows | Fires on PUT /api/transactions/:id |
+| trg_log_tx_changes_delete | Trigger | BEFORE DELETE, audit trail | Fires on DELETE /api/transactions/:id |
+| evt_monthly_budget_snapshot | Event | Event Scheduler, EVERY 1 MONTH | Runs automatically; calls usp_apply_budget_alert |
+| evt_purge_old_alerts | Event | Event Scheduler, archival DELETE | Runs automatically; purges budget_alerts > 12 months |
+| running-balance query | Window function | SUM() OVER (ORDER BY ...) | GET /api/dashboard/running-balance |
+| category-rank query | Window function | RANK() OVER (ORDER BY SUM() DESC) | GET /api/reports/category-rank |
+| export CTE | Common Table Expression | WITH ... AS (...) SELECT | GET /api/export/transactions |
 
 ## Stored Procedures
 

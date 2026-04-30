@@ -1,68 +1,74 @@
-# Personal Finance Tracker - Database
+# pf-tracker database
 
-MySQL 8.0 database for tracking personal income and expense transactions. Runs in Docker via `docker compose`.
+MySQL 8.0 schema, seed data, and reporting queries for pf-tracker. The full
+deployment normally runs from the Compose stack at `infra/docker-compose.yml`;
+this directory holds the database artifacts that the `mysql` service mounts.
 
-## Quick Start
-
-```bash
-cp .env.example .env        # uses rootpass by default
-docker compose up -d        # starts the container; init scripts apply automatically
-```
-
-The Dockerfile copies `init/` into `docker-entrypoint-initdb.d/`, so the schema and seed data load on first start. `deploy.sh` does the same but uses the standalone `schema/` and `seed/` files instead of the init scripts - useful when rebuilding against an already-running container.
-
-Connect once the container is healthy:
-
-```bash
-docker exec -it database-mysql-1 mysql -uroot -prootpass personal_finance
-```
-
-Port 3306 is exposed to the host, so any MySQL client at `127.0.0.1:3306` works as well.
-
-## Structure
+## Layout
 
 ```
 database/
-├── Dockerfile                  # copies init/ into docker-entrypoint-initdb.d
-├── docker-compose.yml
-├── deploy.sh                   # alternative startup: starts compose, loads schema + seed, verifies
-├── .env.example
+├── Dockerfile                  # builds an image that copies init/ into docker-entrypoint-initdb.d/
 ├── init/
-│   ├── 01-schema.sql           # runs on first container start (via entrypoint)
-│   └── 02-seed.sql
-├── schema/
-│   └── schema.sql              # drop/recreate version used by deploy.sh
-├── seed/
-│   └── seed.sql                # used by deploy.sh
+│   ├── 01-schema.sql           # tables, views, stored programs, triggers, events, grants
+│   └── 02-seed.sql             # demo users, categories, transactions, budgets
 ├── queries/
-│   └── report_queries.sql      # five report queries
+│   └── report_queries.sql      # standalone reporting queries
 └── docs/
-    ├── schema_notes.md         # table definitions, constraints, design decisions
+    ├── schema_notes.md         # table definitions, constraints, design rationale
+    ├── normalization.md        # FD analysis through BCNF for all six tables
+    ├── advanced-features.md    # stored programs, triggers, events, window queries
     └── diagrams/
         ├── er_diagram.md
         └── eer_diagram.md
 ```
 
-## Report Queries
+The Dockerfile copies the contents of `init/` into MySQL's
+`docker-entrypoint-initdb.d/`, so the schema and seed run automatically on first
+container start. Subsequent restarts skip initialization unless the data volume
+is destroyed.
 
-| # | Query | What it returns |
-|---|-------|-----------------|
-| 1 | Monthly Expense Totals | Total expenses per year-month |
-| 2 | Monthly Income Totals | Total income per year-month |
-| 3 | Spending by Category | Total spent per expense category, descending |
-| 4 | Income vs Expense by Month | Income, expenses, and net savings side by side |
-| 5 | User Transactions by Date | All transactions for a given user, chronological |
+## Running standalone
 
-Query 5 uses a session variable `@target_user_id`; set it before running.
+The intended path is `cd infra && docker compose up -d`, which brings up MySQL
+with the rest of the stack. To run only this image directly:
 
-## Schema and Constraints
+```bash
+docker build -t pf-tracker-db .
+docker run --rm -p 3306:3306 \
+  -e MYSQL_ROOT_PASSWORD=rootpass \
+  -e MYSQL_DATABASE=personal_finance \
+  pf-tracker-db
+```
 
-Three tables: `Users`, `Categories`, `Transactions`. Key constraints:
+Then connect with any MySQL 8 client at `127.0.0.1:3306` as `root` / `rootpass`.
 
-- `amount > 0` - enforced by CHECK
-- `category_type` and `transaction_type` - restricted to `'income'` or `'expense'` by ENUM and CHECK
-- `Users.email` - UNIQUE
-- `Categories → Users` and `Transactions → Users` - ON DELETE CASCADE
-- `Transactions → Categories` - ON DELETE RESTRICT (prevents category deletion while transactions exist)
+## Schema overview
 
-MySQL CHECK constraints cannot reference other tables, so a `BEFORE INSERT` and `BEFORE UPDATE` trigger enforce that `transaction_type` must match the `category_type` of the assigned category. See [docs/schema_notes.md](docs/schema_notes.md) for the full design rationale and [docs/diagrams/eer_diagram.md](docs/diagrams/eer_diagram.md) for the annotated EER.
+Six base tables: `users`, `categories`, `transactions`, `budgets`,
+`budget_alerts`, `transaction_audit_log`. Four security-definer views:
+`v_user_transactions`, `v_user_categories`, `v_user_budgets`,
+`v_transaction_detail`. The application connects as the `app_user` role and
+sets `@current_user_id` per request; the views filter on
+`current_app_user_id()` to enforce row-level isolation.
+
+See [docs/schema_notes.md](docs/schema_notes.md) for the table-by-table
+definition and [docs/normalization.md](docs/normalization.md) for the BCNF
+analysis (including two documented denormalizations).
+
+## Reporting queries
+
+`queries/report_queries.sql` contains five reporting queries that are also
+exposed through the API:
+
+| # | Query                          | What it returns                                   |
+|---|--------------------------------|---------------------------------------------------|
+| 1 | Monthly Expense Totals         | Total expenses per year-month                     |
+| 2 | Monthly Income Totals          | Total income per year-month                       |
+| 3 | Spending by Category           | Total spent per expense category, descending      |
+| 4 | Income vs Expense by Month     | Income, expenses, and net savings side by side    |
+| 5 | User Transactions by Date      | All transactions for a given user, chronological  |
+
+Query 5 reads `@target_user_id`; set it before running. The `usp_monthly_summary`
+stored procedure wraps query 4 with a cursor-based per-category breakdown — see
+[docs/advanced-features.md](docs/advanced-features.md).
