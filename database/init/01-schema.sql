@@ -162,7 +162,7 @@ END //
 
 DELIMITER ;
 
--- RLS: restricted application account (Phase 03)
+-- RLS: restricted application account
 CREATE USER IF NOT EXISTS 'app_user'@'%' IDENTIFIED BY 'pf_app_2026';
 REVOKE ALL PRIVILEGES, GRANT OPTION FROM 'app_user'@'%';
 
@@ -232,7 +232,7 @@ GRANT EXECUTE ON personal_finance.* TO 'app_user'@'%';
 
 FLUSH PRIVILEGES;
 
--- Phase 4: Stored procedures (PL/SQL — Lecture 6)
+-- Stored procedures
 DELIMITER //
 
 CREATE DEFINER=`root`@`localhost` PROCEDURE usp_monthly_summary(
@@ -388,7 +388,7 @@ END //
 
 DELIMITER ;
 
--- Phase 4: Stored functions (Lecture 6)
+-- Stored functions
 DELIMITER //
 
 CREATE DEFINER=`root`@`localhost` FUNCTION fn_net_balance(p_user_id INT)
@@ -422,7 +422,7 @@ RETURN DATEDIFF(p_end_date, p_start_date) + 1 //
 
 DELIMITER ;
 
--- Phase 4: Composite audit trigger (AFTER INSERT/UPDATE/DELETE on transactions — Lecture 6)
+-- Audit trigger fires AFTER INSERT/UPDATE and BEFORE DELETE on transactions.
 -- MySQL requires one trigger per event type; all three write to transaction_audit_log.
 DELIMITER //
 
@@ -461,7 +461,7 @@ END //
 
 DELIMITER ;
 
--- Phase 4: Scheduled events (Event Scheduler — Lecture 6)
+-- Scheduled events.
 -- event_scheduler=ON is enabled via docker-compose command flag (infra/docker-compose.yml).
 DELIMITER //
 
