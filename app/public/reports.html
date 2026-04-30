@@ -1,34 +1,116 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Reports</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Reports — pf-tracker</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/css/tabler.min.css" />
+  <link rel="stylesheet" href="/style.css" />
 </head>
-<body data-page="reports">
-  <main class="card">
-    <h1>Reports</h1>
-
-    <section>
-      <h2>Select Report Type</h2>
-      <div class="report-buttons">
-        <button type="button" class="btn" data-report="monthly">Monthly Spending</button>
-        <button type="button" class="btn" data-report="by-category">Spending by Category</button>
+<body class="antialiased" data-page="reports">
+  <div class="wrapper">
+    <aside class="navbar navbar-vertical navbar-expand-lg" data-bs-theme="dark">
+      <div class="container-fluid">
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar-menu">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <a href="/" class="navbar-brand">pf-tracker</a>
+        <div class="collapse navbar-collapse" id="navbar-menu">
+          <ul class="navbar-nav pt-lg-3">
+            <li class="nav-item">
+              <a class="nav-link" href="/">Dashboard</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="/transactions.html">Transactions</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="/categories.html">Categories</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="/budgets.html">Budgets</a>
+            </li>
+            <li class="nav-item active">
+              <a class="nav-link" href="/reports.html">Reports</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="/profile.html">Profile</a>
+            </li>
+          </ul>
+          <div class="mt-auto p-3">
+            <button type="button" class="btn btn-ghost-danger w-100" id="sign-out-btn">Sign out</button>
+          </div>
+        </div>
       </div>
-    </section>
+    </aside>
 
-    <section id="report-results">
-      <h2>Results</h2>
-      <p class="muted" id="report-placeholder">Choose a report above to see results.</p>
-      <table id="report-table" hidden>
-        <thead></thead>
-        <tbody></tbody>
-      </table>
-    </section>
+    <div class="page-wrapper">
+      <div class="page-header d-print-none">
+        <div class="container-xl">
+          <div class="row g-2 align-items-center">
+            <div class="col-auto">
+              <h2 class="page-title">Reports</h2>
+            </div>
+            <div class="col-auto ms-auto">
+              <div class="d-flex gap-2 align-items-center">
+                <label class="form-label mb-0">Month</label>
+                <input type="month" id="report-month" class="form-control form-control-sm" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
-    <a class="btn btn-ghost" href="index.html">Back to Home</a>
-  </main>
-  <script src="script.js"></script>
+      <div class="page-body">
+        <div class="container-xl">
+
+          <div class="row row-deck row-cards mb-4">
+            <div class="col-12 col-md-8">
+              <div class="card">
+                <div class="card-header">
+                  <h3 class="card-title">Monthly Summary</h3>
+                </div>
+                <div class="card-body">
+                  <canvas id="monthly-chart-canvas" height="140"></canvas>
+                </div>
+              </div>
+            </div>
+            <div class="col-12 col-md-4">
+              <div class="card">
+                <div class="card-header">
+                  <h3 class="card-title">By Category</h3>
+                </div>
+                <div class="card-body">
+                  <canvas id="category-chart-canvas" height="140"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Category Rank</h3>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-vcenter card-table" id="rank-table">
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Category</th>
+                    <th>Type</th>
+                    <th class="text-end">Total</th>
+                  </tr>
+                </thead>
+                <tbody id="rank-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/js/tabler.min.js"></script>
+  <script src="/script.js"></script>
 </body>
 </html>

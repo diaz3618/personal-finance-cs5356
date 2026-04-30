@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Categories — pf-tracker</title>
+  <title>Budgets — pf-tracker</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/css/tabler.min.css" />
   <link rel="stylesheet" href="/style.css" />
 </head>
-<body class="antialiased" data-page="categories">
+<body class="antialiased" data-page="budgets">
   <div class="wrapper">
     <aside class="navbar navbar-vertical navbar-expand-lg" data-bs-theme="dark">
       <div class="container-fluid">
@@ -23,10 +23,10 @@
             <li class="nav-item">
               <a class="nav-link" href="/transactions.html">Transactions</a>
             </li>
-            <li class="nav-item active">
+            <li class="nav-item">
               <a class="nav-link" href="/categories.html">Categories</a>
             </li>
-            <li class="nav-item">
+            <li class="nav-item active">
               <a class="nav-link" href="/budgets.html">Budgets</a>
             </li>
             <li class="nav-item">
@@ -48,7 +48,13 @@
         <div class="container-xl">
           <div class="row g-2 align-items-center">
             <div class="col-auto">
-              <h2 class="page-title">Categories</h2>
+              <h2 class="page-title">Budgets</h2>
+            </div>
+            <div class="col-auto ms-auto">
+              <div class="d-flex gap-2 align-items-center">
+                <label class="form-label mb-0">Month</label>
+                <input type="month" id="month-select" class="form-control form-control-sm" />
+              </div>
             </div>
           </div>
         </div>
@@ -56,50 +62,25 @@
 
       <div class="page-body">
         <div class="container-xl">
-
-          <div class="card mb-4">
+          <div class="card">
             <div class="table-responsive">
-              <table class="table table-vcenter card-table">
+              <table class="table table-vcenter card-table" id="budget-table">
                 <thead>
                   <tr>
-                    <th>Name</th>
-                    <th>Type</th>
+                    <th>Category</th>
+                    <th class="text-end">Actual</th>
+                    <th class="text-end">Limit</th>
+                    <th>Progress</th>
                     <th class="w-1"></th>
                   </tr>
                 </thead>
-                <tbody id="category-list"></tbody>
+                <tbody id="budget-body"></tbody>
               </table>
             </div>
-          </div>
-
-          <div class="card">
-            <div class="card-header">
-              <h3 class="card-title">Add Category</h3>
-            </div>
-            <div class="card-body">
-              <form id="category-form">
-                <div class="row g-3 align-items-end">
-                  <div class="col">
-                    <label class="form-label">Name</label>
-                    <input type="text" name="name" class="form-control" maxlength="50" required />
-                  </div>
-                  <div class="col-auto" style="min-width:140px">
-                    <label class="form-label">Type</label>
-                    <select name="type" class="form-select" required>
-                      <option value="">Choose…</option>
-                      <option value="expense">Expense</option>
-                      <option value="income">Income</option>
-                    </select>
-                  </div>
-                  <div class="col-auto">
-                    <button type="submit" class="btn btn-primary">Add</button>
-                  </div>
-                </div>
-                <p id="form-status" class="mt-2 mb-0 small" role="status" aria-live="polite"></p>
-              </form>
+            <div class="card-footer">
+              <p id="budget-status" class="mb-0 small" role="status" aria-live="polite"></p>
             </div>
           </div>
-
         </div>
       </div>
     </div>

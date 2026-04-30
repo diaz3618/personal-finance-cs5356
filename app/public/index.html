@@ -1,20 +1,115 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Personal Expense Tracker</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Dashboard — pf-tracker</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/css/tabler.min.css" />
+  <link rel="stylesheet" href="/style.css" />
 </head>
-<body data-page="home">
-  <main class="card">
-    <h1>Personal Expense Tracker</h1>
-    <nav class="home-nav">
-      <a class="btn" href="add-transaction.html">Add Transaction</a>
-      <a class="btn" href="categories.html">Manage Categories</a>
-      <a class="btn" href="reports.html">View Reports</a>
-    </nav>
-  </main>
-  <script src="script.js"></script>
+<body class="antialiased" data-page="dashboard">
+  <div class="wrapper">
+    <aside class="navbar navbar-vertical navbar-expand-lg" data-bs-theme="dark">
+      <div class="container-fluid">
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar-menu">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <a href="/" class="navbar-brand">pf-tracker</a>
+        <div class="collapse navbar-collapse" id="navbar-menu">
+          <ul class="navbar-nav pt-lg-3">
+            <li class="nav-item active">
+              <a class="nav-link" href="/">Dashboard</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="/transactions.html">Transactions</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="/categories.html">Categories</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="/budgets.html">Budgets</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="/reports.html">Reports</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="/profile.html">Profile</a>
+            </li>
+          </ul>
+          <div class="mt-auto p-3">
+            <button type="button" class="btn btn-ghost-danger w-100" id="sign-out-btn">Sign out</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="page-wrapper">
+      <div class="page-header d-print-none">
+        <div class="container-xl">
+          <div class="row g-2 align-items-center">
+            <div class="col-auto">
+              <h2 class="page-title">Dashboard</h2>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="page-body">
+        <div class="container-xl">
+
+          <div class="row row-deck row-cards mb-4">
+            <div class="col-12 col-md-4">
+              <div class="card">
+                <div class="card-body">
+                  <div class="subheader mb-2">Net Balance</div>
+                  <div class="h1 mb-0" id="net-balance">—</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="row row-deck row-cards mb-4">
+            <div class="col-12">
+              <div class="card">
+                <div class="card-header">
+                  <h3 class="card-title">This Month</h3>
+                </div>
+                <div class="card-body">
+                  <canvas id="monthly-chart" height="120"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="row row-deck row-cards">
+            <div class="col-12">
+              <div class="card">
+                <div class="card-header">
+                  <h3 class="card-title">Recent Transactions</h3>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-vcenter card-table">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Category</th>
+                        <th>Type</th>
+                        <th class="text-end">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody id="recent-transactions"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/js/tabler.min.js"></script>
+  <script src="/script.js"></script>
 </body>
 </html>

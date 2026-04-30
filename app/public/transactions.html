@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Categories — pf-tracker</title>
+  <title>Transactions — pf-tracker</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/css/tabler.min.css" />
   <link rel="stylesheet" href="/style.css" />
 </head>
-<body class="antialiased" data-page="categories">
+<body class="antialiased" data-page="transactions">
   <div class="wrapper">
     <aside class="navbar navbar-vertical navbar-expand-lg" data-bs-theme="dark">
       <div class="container-fluid">
@@ -20,10 +20,10 @@
             <li class="nav-item">
               <a class="nav-link" href="/">Dashboard</a>
             </li>
-            <li class="nav-item">
+            <li class="nav-item active">
               <a class="nav-link" href="/transactions.html">Transactions</a>
             </li>
-            <li class="nav-item active">
+            <li class="nav-item">
               <a class="nav-link" href="/categories.html">Categories</a>
             </li>
             <li class="nav-item">
@@ -48,7 +48,7 @@
         <div class="container-xl">
           <div class="row g-2 align-items-center">
             <div class="col-auto">
-              <h2 class="page-title">Categories</h2>
+              <h2 class="page-title">Transactions</h2>
             </div>
           </div>
         </div>
@@ -57,39 +57,89 @@
       <div class="page-body">
         <div class="container-xl">
 
-          <div class="card mb-4">
-            <div class="table-responsive">
+          <div class="card mb-3" id="filter-bar">
+            <div class="card-body">
+              <div class="row g-3 align-items-end">
+                <div class="col-sm-auto">
+                  <label class="form-label">From</label>
+                  <input type="date" id="filter-date-from" class="form-control" />
+                </div>
+                <div class="col-sm-auto">
+                  <label class="form-label">To</label>
+                  <input type="date" id="filter-date-to" class="form-control" />
+                </div>
+                <div class="col-sm">
+                  <label class="form-label">Category</label>
+                  <select id="filter-category" class="form-select">
+                    <option value="">All categories</option>
+                  </select>
+                </div>
+                <div class="col-sm-auto">
+                  <label class="form-label">Type</label>
+                  <select id="filter-type" class="form-select">
+                    <option value="">All types</option>
+                    <option value="income">Income</option>
+                    <option value="expense">Expense</option>
+                  </select>
+                </div>
+                <div class="col-auto">
+                  <button type="button" class="btn btn-secondary" id="filter-reset">Reset</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card mb-3">
+            <div class="table-responsive" id="transaction-table">
               <table class="table table-vcenter card-table">
                 <thead>
                   <tr>
-                    <th>Name</th>
+                    <th>Date</th>
+                    <th>Category</th>
                     <th>Type</th>
+                    <th>Notes</th>
+                    <th class="text-end">Amount</th>
                     <th class="w-1"></th>
                   </tr>
                 </thead>
-                <tbody id="category-list"></tbody>
+                <tbody id="transaction-list"></tbody>
               </table>
             </div>
+            <div class="card-footer" id="pagination"></div>
           </div>
 
           <div class="card">
             <div class="card-header">
-              <h3 class="card-title">Add Category</h3>
+              <h3 class="card-title">Add Transaction</h3>
             </div>
             <div class="card-body">
-              <form id="category-form">
-                <div class="row g-3 align-items-end">
-                  <div class="col">
-                    <label class="form-label">Name</label>
-                    <input type="text" name="name" class="form-control" maxlength="50" required />
+              <form id="transaction-form">
+                <div class="row g-3">
+                  <div class="col-sm-3">
+                    <label class="form-label">Amount</label>
+                    <input type="number" name="amount" step="0.01" min="0.01" class="form-control" required />
                   </div>
-                  <div class="col-auto" style="min-width:140px">
+                  <div class="col-sm-3">
+                    <label class="form-label">Date</label>
+                    <input type="date" name="date" class="form-control" required />
+                  </div>
+                  <div class="col-sm-3">
                     <label class="form-label">Type</label>
                     <select name="type" class="form-select" required>
                       <option value="">Choose…</option>
                       <option value="expense">Expense</option>
                       <option value="income">Income</option>
                     </select>
+                  </div>
+                  <div class="col-sm-3">
+                    <label class="form-label">Category</label>
+                    <select id="tx-category" name="categoryId" class="form-select" required>
+                      <option value="">Choose…</option>
+                    </select>
+                  </div>
+                  <div class="col-12">
+                    <label class="form-label">Notes</label>
+                    <input type="text" name="notes" class="form-control" maxlength="255" />
                   </div>
                   <div class="col-auto">
                     <button type="submit" class="btn btn-primary">Add</button>
