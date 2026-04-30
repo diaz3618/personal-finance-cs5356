@@ -811,9 +811,193 @@ async function initBudgets() {
 
 // --- Reports ----------------------------------------------------------------
 
-function initReports() {}
+async function initReports() {
+  const monthInput = document.getElementById('report-month');
+  const monthlyChartEl = document.getElementById('monthly-chart-canvas');
+  const categoryChartEl = document.getElementById('category-chart-canvas');
+  const rankBody = document.getElementById('rank-body');
+
+  let monthlyChart = null;
+  let categoryChart = null;
+
+  const now = new Date();
+  const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  if (monthInput) monthInput.value = defaultMonth;
+
+  async function renderReports() {
+    const val = (monthInput && monthInput.value) || defaultMonth;
+    const [year, month] = val.split('-').map(Number);
+
+    if (monthlyChart) { monthlyChart.destroy(); monthlyChart = null; }
+    if (categoryChart) { categoryChart.destroy(); categoryChart = null; }
+    if (rankBody) rankBody.innerHTML = '';
+
+    let monthly = [];
+    let rankData = [];
+
+    try {
+      [monthly, rankData] = await Promise.all([
+        api.get(`/api/reports/monthly?year=${year}&month=${month}`),
+        api.get(`/api/reports/category-rank?year=${year}&month=${month}`),
+      ]);
+      monthly = monthly || [];
+      rankData = rankData || [];
+    } catch (err) {
+      if (rankBody) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 4;
+        td.textContent = `Failed to load: ${err.message}`;
+        tr.appendChild(td);
+        rankBody.appendChild(tr);
+      }
+      return;
+    }
+
+    if (monthly.length === 0 && rankData.length === 0) {
+      if (rankBody) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 4;
+        td.className = 'text-secondary text-center';
+        td.textContent = 'No data for this month.';
+        tr.appendChild(td);
+        rankBody.appendChild(tr);
+      }
+      return;
+    }
+
+    await loadChartJS();
+
+    if (monthlyChartEl && monthly.length > 0) {
+      monthlyChart = new Chart(monthlyChartEl, {
+        type: 'bar',
+        data: {
+          labels: monthly.map(r => r.category_name),
+          datasets: [{
+            label: 'Amount',
+            data: monthly.map(r => r.total),
+            backgroundColor: monthly.map(r =>
+              r.category_type === 'income' ? 'rgba(79,209,122,0.7)' : 'rgba(255,107,107,0.7)'
+            ),
+          }],
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false } },
+        },
+      });
+    }
+
+    if (categoryChartEl && monthly.length > 0) {
+      categoryChart = new Chart(categoryChartEl, {
+        type: 'doughnut',
+        data: {
+          labels: monthly.map(r => r.category_name),
+          datasets: [{
+            data: monthly.map(r => r.total),
+            backgroundColor: monthly.map((_, i) => `hsl(${(i * 47) % 360}, 65%, 60%)`),
+          }],
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { position: 'bottom' } },
+        },
+      });
+    }
+
+    if (rankBody) {
+      rankBody.innerHTML = '';
+      if (rankData.length === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 4;
+        td.className = 'text-secondary text-center';
+        td.textContent = 'No ranked data.';
+        tr.appendChild(td);
+        rankBody.appendChild(tr);
+      } else {
+        for (const r of rankData) {
+          const tr = document.createElement('tr');
+          const rankTd = document.createElement('td');
+          rankTd.textContent = String(r.spend_rank);
+          const nameTd = document.createElement('td');
+          nameTd.textContent = r.category_name;
+          const typeTd = document.createElement('td');
+          typeTd.textContent = r.category_type;
+          const totalTd = document.createElement('td');
+          totalTd.className = 'text-end';
+          totalTd.textContent = formatAmount(r.total);
+          tr.appendChild(rankTd);
+          tr.appendChild(nameTd);
+          tr.appendChild(typeTd);
+          tr.appendChild(totalTd);
+          rankBody.appendChild(tr);
+        }
+      }
+    }
+  }
+
+  if (monthInput) monthInput.addEventListener('change', renderReports);
+  renderReports();
+}
 
 // --- Profile ----------------------------------------------------------------
 
-function initProfile() {}
+async function initProfile() {
+  const profileInfo = document.getElementById('profile-info');
+  const exportBtn = document.getElementById('export-btn');
+
+  if (profileInfo) {
+    try {
+      const user = await api.get('/api/auth/me');
+      profileInfo.innerHTML = '';
+
+      const dl = document.createElement('dl');
+      dl.className = 'row';
+
+      const fields = [
+        ['Name', user.display_name || '—'],
+        ['Email', user.email || '—'],
+        ['Member since', user.created_at ? new Date(user.created_at).toLocaleDateString() : '—'],
+      ];
+
+      for (const [label, value] of fields) {
+        const dt = document.createElement('dt');
+        dt.className = 'col-5';
+        dt.textContent = label;
+        const dd = document.createElement('dd');
+        dd.className = 'col-7';
+        dd.textContent = value;
+        dl.appendChild(dt);
+        dl.appendChild(dd);
+      }
+      profileInfo.appendChild(dl);
+    } catch (err) {
+      if (profileInfo) profileInfo.textContent = `Could not load profile: ${err.message}`;
+    }
+  }
+
+  if (exportBtn) {
+    exportBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try {
+        const headers = await authHeaders();
+        const res = await fetch('/api/export/transactions', { headers });
+        if (!res.ok) throw new Error(`Export failed (${res.status})`);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'transactions.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        alert(`Export failed: ${err.message}`);
+      }
+    });
+  }
+}
 
