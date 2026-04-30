@@ -516,37 +516,124 @@ async function initCategories() {
   const list = document.getElementById('category-list');
   const status = document.getElementById('form-status');
 
-  async function reload() {
+  let categories = [];
+
+  function buildRow(c) {
+    const tr = document.createElement('tr');
+    tr.dataset.id = c.category_id;
+
+    const nameTd = document.createElement('td');
+    nameTd.textContent = c.category_name;
+    const typeTd = document.createElement('td');
+    const badge = document.createElement('span');
+    badge.className = 'type-badge';
+    badge.textContent = c.category_type;
+    typeTd.appendChild(badge);
+    const actionsTd = document.createElement('td');
+
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'btn btn-sm btn-ghost-secondary me-1';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', () => activateEdit(tr, c));
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'btn btn-sm btn-ghost-danger';
+    delBtn.textContent = 'Delete';
+    delBtn.addEventListener('click', async () => {
+      if (!confirm(`Delete "${c.category_name}"?`)) return;
+      try {
+        await api.delete(`/api/categories/${c.category_id}`);
+        categories = categories.filter(x => x.category_id !== c.category_id);
+        render();
+      } catch (err) {
+        alert(`Delete failed: ${err.message}`);
+      }
+    });
+
+    actionsTd.appendChild(editBtn);
+    actionsTd.appendChild(delBtn);
+    tr.appendChild(nameTd);
+    tr.appendChild(typeTd);
+    tr.appendChild(actionsTd);
+    return tr;
+  }
+
+  function activateEdit(tr, c) {
+    const tds = tr.querySelectorAll('td');
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'form-control form-control-sm';
+    nameInput.value = c.category_name;
+    nameInput.maxLength = 50;
+    tds[0].innerHTML = '';
+    tds[0].appendChild(nameInput);
+
+    const typeSelect = document.createElement('select');
+    typeSelect.className = 'form-select form-select-sm';
+    for (const v of ['expense', 'income']) {
+      const opt = document.createElement('option');
+      opt.value = v;
+      opt.textContent = v;
+      if (v === c.category_type) opt.selected = true;
+      typeSelect.appendChild(opt);
+    }
+    tds[1].innerHTML = '';
+    tds[1].appendChild(typeSelect);
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'btn btn-sm btn-primary me-1';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', async () => {
+      try {
+        await api.put(`/api/categories/${c.category_id}`, {
+          name: nameInput.value,
+          type: typeSelect.value,
+        });
+        const idx = categories.findIndex(x => x.category_id === c.category_id);
+        if (idx >= 0) {
+          categories[idx] = { ...categories[idx], category_name: nameInput.value, category_type: typeSelect.value };
+        }
+        render();
+      } catch (err) {
+        alert(`Save failed: ${err.message}`);
+      }
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn btn-sm btn-ghost-secondary';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => render());
+
+    tds[2].innerHTML = '';
+    tds[2].appendChild(saveBtn);
+    tds[2].appendChild(cancelBtn);
+  }
+
+  function render() {
     if (!list) return;
     list.innerHTML = '';
-    try {
-      const categories = await api.get('/api/categories');
-      if (!categories || categories.length === 0) {
-        const tr = document.createElement('tr');
-        const td = document.createElement('td');
-        td.colSpan = 3;
-        td.className = 'text-secondary';
-        td.textContent = 'No categories yet.';
-        tr.appendChild(td);
-        list.appendChild(tr);
-        return;
-      }
-      for (const c of categories) {
-        const tr = document.createElement('tr');
-        const nameTd = document.createElement('td');
-        nameTd.textContent = c.category_name;
-        const typeTd = document.createElement('td');
-        const badge = document.createElement('span');
-        badge.className = 'type-badge';
-        badge.textContent = c.category_type;
-        typeTd.appendChild(badge);
-        const actionsTd = document.createElement('td');
-        tr.appendChild(nameTd);
-        tr.appendChild(typeTd);
-        tr.appendChild(actionsTd);
-        list.appendChild(tr);
-      }
-    } catch (err) {
+    if (categories.length === 0) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 3;
+      td.className = 'text-secondary';
+      td.textContent = 'No categories yet.';
+      tr.appendChild(td);
+      list.appendChild(tr);
+      return;
+    }
+    for (const c of categories) list.appendChild(buildRow(c));
+  }
+
+  try {
+    categories = (await api.get('/api/categories')) || [];
+  } catch (err) {
+    if (list) {
       const tr = document.createElement('tr');
       const td = document.createElement('td');
       td.colSpan = 3;
@@ -554,20 +641,25 @@ async function initCategories() {
       tr.appendChild(td);
       list.appendChild(tr);
     }
+    return;
   }
 
-  await reload();
+  render();
 
   if (form) {
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       setStatus(status, 'Adding…');
-      const payload = { name: form.name.value, type: form.type.value };
       try {
-        await api.post('/api/categories', payload);
+        const created = await api.post('/api/categories', {
+          name: form.name.value,
+          type: form.type.value,
+        });
+        if (created) categories.push(created);
+        else categories = (await api.get('/api/categories')) || [];
         setStatus(status, 'Category added.', 'success');
         form.reset();
-        await reload();
+        render();
       } catch (err) {
         setStatus(status, err.message, 'error');
       }
@@ -577,7 +669,145 @@ async function initCategories() {
 
 // --- Budgets ----------------------------------------------------------------
 
-function initBudgets() {}
+async function initBudgets() {
+  const monthSelect = document.getElementById('month-select');
+  const budgetBody = document.getElementById('budget-body');
+  const budgetStatus = document.getElementById('budget-status');
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+
+  if (monthSelect) {
+    for (let m = 1; m <= 12; m++) {
+      const opt = document.createElement('option');
+      const mm = String(m).padStart(2, '0');
+      opt.value = `${currentYear}-${mm}`;
+      opt.textContent = new Date(currentYear, m - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+      if (m === currentMonth) opt.selected = true;
+      monthSelect.appendChild(opt);
+    }
+    monthSelect.addEventListener('change', loadBudgets);
+  }
+
+  let allCategories = [];
+  try {
+    allCategories = (await api.get('/api/categories')) || [];
+  } catch {
+    allCategories = [];
+  }
+
+  async function loadBudgets() {
+    if (!budgetBody) return;
+    budgetBody.innerHTML = '';
+    const month = monthSelect ? monthSelect.value : `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+
+    let budgets = [];
+    try {
+      budgets = (await api.get(`/api/budgets?month=${month}`)) || [];
+    } catch (err) {
+      setStatus(budgetStatus, `Failed to load: ${err.message}`, 'error');
+      return;
+    }
+
+    const budgetByCategory = {};
+    for (const b of budgets) budgetByCategory[b.category_id] = b;
+
+    if (allCategories.length === 0) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 5;
+      td.className = 'text-secondary text-center';
+      td.textContent = 'No categories found.';
+      tr.appendChild(td);
+      budgetBody.appendChild(tr);
+      return;
+    }
+
+    for (const cat of allCategories) {
+      const budget = budgetByCategory[cat.category_id];
+      const limitAmount = budget ? Number(budget.limit_amount) : 0;
+      const actualAmount = budget ? Number(budget.actual_amount) : 0;
+      const pct = limitAmount > 0 ? Math.min(100, Math.round((actualAmount / limitAmount) * 100)) : 0;
+      const over = limitAmount > 0 && actualAmount > limitAmount;
+
+      const tr = document.createElement('tr');
+
+      const nameTd = document.createElement('td');
+      nameTd.textContent = cat.category_name;
+
+      const actualTd = document.createElement('td');
+      actualTd.className = 'text-end';
+      actualTd.textContent = formatAmount(actualAmount);
+
+      const limitTd = document.createElement('td');
+      limitTd.className = 'text-end';
+      const limitInput = document.createElement('input');
+      limitInput.type = 'number';
+      limitInput.className = 'form-control form-control-sm text-end';
+      limitInput.style.width = '110px';
+      limitInput.step = '0.01';
+      limitInput.min = '0';
+      limitInput.value = limitAmount > 0 ? limitAmount : '';
+      limitInput.placeholder = '0.00';
+      limitInput.addEventListener('blur', async () => {
+        const newLimit = Number(limitInput.value) || 0;
+        if (newLimit === limitAmount) return;
+        try {
+          if (budget) {
+            await api.put(`/api/budgets/${budget.id}`, { limit_amount: newLimit });
+            budget.limit_amount = newLimit;
+          } else {
+            const created = await api.post('/api/budgets', {
+              category_id: cat.category_id,
+              month,
+              limit_amount: newLimit,
+            });
+            if (created) budgetByCategory[cat.category_id] = created;
+          }
+          setStatus(budgetStatus, 'Budget saved.', 'success');
+        } catch (err) {
+          setStatus(budgetStatus, `Save failed: ${err.message}`, 'error');
+        }
+      });
+      limitTd.appendChild(limitInput);
+
+      const progressTd = document.createElement('td');
+      if (limitAmount > 0) {
+        const bar = document.createElement('div');
+        bar.className = 'progress';
+        bar.style.minWidth = '100px';
+        const inner = document.createElement('div');
+        inner.className = `progress-bar${over ? ' bg-danger' : ''}`;
+        inner.style.width = `${pct}%`;
+        inner.setAttribute('role', 'progressbar');
+        inner.setAttribute('aria-valuenow', pct);
+        inner.setAttribute('aria-valuemin', '0');
+        inner.setAttribute('aria-valuemax', '100');
+        inner.textContent = `${pct}%`;
+        bar.appendChild(inner);
+        progressTd.appendChild(bar);
+      }
+
+      const flagTd = document.createElement('td');
+      if (over) {
+        const badge = document.createElement('span');
+        badge.className = 'badge bg-danger';
+        badge.textContent = 'Over limit';
+        flagTd.appendChild(badge);
+      }
+
+      tr.appendChild(nameTd);
+      tr.appendChild(actualTd);
+      tr.appendChild(limitTd);
+      tr.appendChild(progressTd);
+      tr.appendChild(flagTd);
+      budgetBody.appendChild(tr);
+    }
+  }
+
+  await loadBudgets();
+}
 
 // --- Reports ----------------------------------------------------------------
 
