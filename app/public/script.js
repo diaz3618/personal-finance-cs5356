@@ -45,6 +45,25 @@ const api = {
     if (!res.ok) throw new Error(await readError(res));
     return res.json();
   },
+  async put(path, body) {
+    const res = await fetch(path, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 401) { location.href = '/login.html'; return; }
+    if (!res.ok) throw new Error(await readError(res));
+    return res.status === 204 ? null : res.json();
+  },
+  async delete(path) {
+    const res = await fetch(path, {
+      method: 'DELETE',
+      headers: await authHeaders(),
+    });
+    if (res.status === 401) { location.href = '/login.html'; return; }
+    if (!res.ok) throw new Error(await readError(res));
+    return null;
+  },
 };
 
 async function readError(res) {
@@ -67,12 +86,28 @@ function formatAmount(value) {
   return '$' + Number(value).toFixed(2);
 }
 
-// --- Page initializers -----------------------------------------------------
+let chartJsLoading = null;
+async function loadChartJS() {
+  if (window.Chart) return;
+  if (!chartJsLoading) {
+    chartJsLoading = new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';
+      s.onload = res;
+      s.onerror = () => rej(new Error('Failed to load Chart.js'));
+      document.head.appendChild(s);
+    });
+  }
+  await chartJsLoading;
+}
 
 const pages = {
-  'add-transaction': initAddTransaction,
+  dashboard: initDashboard,
+  transactions: initTransactions,
   categories: initCategories,
+  budgets: initBudgets,
   reports: initReports,
+  profile: initProfile,
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -87,55 +122,391 @@ document.addEventListener('DOMContentLoaded', async () => {
     location.href = '/login.html';
     return;
   }
+  const signOutBtn = document.getElementById('sign-out-btn');
+  if (signOutBtn) {
+    signOutBtn.addEventListener('click', () => {
+      clerk.signOut().then(() => { location.href = '/login.html'; });
+    });
+  }
   const page = document.body.dataset.page;
   const init = pages[page];
   if (init) init();
 });
 
-// --- Add Transaction -------------------------------------------------------
+// --- Dashboard --------------------------------------------------------------
 
-async function initAddTransaction() {
-  const form = document.getElementById('transaction-form');
-  const categoryEl = document.getElementById('category');
-  const dateEl = document.getElementById('date');
-  const status = document.getElementById('form-status');
-
-  dateEl.valueAsDate = new Date();
+async function initDashboard() {
+  const balanceEl = document.getElementById('net-balance');
+  const chartEl = document.getElementById('monthly-chart');
+  const tbody = document.getElementById('recent-transactions');
 
   try {
-    const categories = await api.get('/api/categories');
-    for (const c of categories) {
-      const opt = document.createElement('option');
-      opt.value = String(c.CategoryID);
-      opt.textContent = `${c.CategoryName} (${c.CategoryType})`;
-      categoryEl.appendChild(opt);
+    const summary = await api.get('/api/dashboard/summary');
+    if (balanceEl) balanceEl.textContent = formatAmount(summary.net_balance);
+  } catch {
+    if (balanceEl) balanceEl.textContent = 'Unavailable';
+  }
+
+  try {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const monthly = await api.get(`/api/reports/monthly?year=${year}&month=${month}`);
+    if (chartEl && monthly.length > 0) {
+      await loadChartJS();
+      new Chart(chartEl, {
+        type: 'bar',
+        data: {
+          labels: monthly.map(r => r.category_name),
+          datasets: [{
+            label: 'Amount',
+            data: monthly.map(r => r.total),
+            backgroundColor: monthly.map(r =>
+              r.category_type === 'income' ? 'rgba(79,209,122,0.7)' : 'rgba(255,107,107,0.7)'
+            ),
+          }],
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false } },
+        },
+      });
+    }
+  } catch {
+    // chart is non-critical
+  }
+
+  try {
+    const txns = await api.get('/api/transactions');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const recent = (txns || []).slice(0, 5);
+    if (recent.length === 0) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 4;
+      td.className = 'text-secondary text-center';
+      td.textContent = 'No transactions yet.';
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      return;
+    }
+    for (const t of recent) {
+      const tr = document.createElement('tr');
+      const dateTd = document.createElement('td');
+      dateTd.textContent = t.transaction_date ? String(t.transaction_date).slice(0, 10) : '';
+      const catTd = document.createElement('td');
+      catTd.textContent = t.category_name || '';
+      const typeTd = document.createElement('td');
+      typeTd.textContent = t.transaction_type || '';
+      const amtTd = document.createElement('td');
+      amtTd.className = 'text-end';
+      amtTd.textContent = formatAmount(t.amount);
+      tr.appendChild(dateTd);
+      tr.appendChild(catTd);
+      tr.appendChild(typeTd);
+      tr.appendChild(amtTd);
+      tbody.appendChild(tr);
     }
   } catch (err) {
-    setStatus(status, `Could not load categories: ${err.message}`, 'error');
+    if (tbody) {
+      tbody.innerHTML = '';
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 4;
+      td.textContent = `Error: ${err.message}`;
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+    }
+  }
+}
+
+// --- Transactions -----------------------------------------------------------
+
+async function initTransactions() {
+  const txList = document.getElementById('transaction-list');
+  const txForm = document.getElementById('transaction-form');
+  const txCategory = document.getElementById('tx-category');
+  const filterCategory = document.getElementById('filter-category');
+  const filterDateFrom = document.getElementById('filter-date-from');
+  const filterDateTo = document.getElementById('filter-date-to');
+  const filterType = document.getElementById('filter-type');
+  const filterReset = document.getElementById('filter-reset');
+  const paginationEl = document.getElementById('pagination');
+  const status = document.getElementById('form-status');
+
+  const PAGE_SIZE = 25;
+  let allTransactions = [];
+  let allCategories = [];
+  let currentPage = 1;
+
+  try {
+    [allTransactions, allCategories] = await Promise.all([
+      api.get('/api/transactions'),
+      api.get('/api/categories'),
+    ]);
+    allTransactions = allTransactions || [];
+    allCategories = allCategories || [];
+  } catch (err) {
+    if (txList) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 6;
+      td.textContent = `Failed to load: ${err.message}`;
+      tr.appendChild(td);
+      txList.appendChild(tr);
+    }
     return;
   }
 
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    setStatus(status, 'Saving…');
+  for (const c of allCategories) {
+    const opt = document.createElement('option');
+    opt.value = String(c.category_id);
+    opt.textContent = `${c.category_name} (${c.category_type})`;
+    if (txCategory) txCategory.appendChild(opt.cloneNode(true));
+    if (filterCategory) filterCategory.appendChild(opt);
+  }
 
-    const payload = {
-      amount: Number(form.amount.value),
-      date: form.date.value,
-      type: form.type.value,
-      categoryId: Number(form.categoryId.value),
-      description: form.description.value || null,
-    };
+  function filtered() {
+    return allTransactions.filter(t => {
+      const date = String(t.transaction_date).slice(0, 10);
+      if (filterDateFrom && filterDateFrom.value && date < filterDateFrom.value) return false;
+      if (filterDateTo && filterDateTo.value && date > filterDateTo.value) return false;
+      if (filterCategory && filterCategory.value && String(t.category_id) !== filterCategory.value) return false;
+      if (filterType && filterType.value && t.transaction_type !== filterType.value) return false;
+      return true;
+    });
+  }
 
-    try {
-      await api.post('/api/transactions', payload);
-      setStatus(status, 'Transaction saved.', 'success');
-      form.reset();
-      dateEl.valueAsDate = new Date();
-    } catch (err) {
-      setStatus(status, err.message, 'error');
+  function renderPage() {
+    if (!txList) return;
+    const rows = filtered();
+    const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+    if (currentPage > totalPages) currentPage = totalPages;
+    const slice = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+    txList.innerHTML = '';
+    if (slice.length === 0) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 6;
+      td.className = 'text-secondary text-center';
+      td.textContent = 'No transactions found.';
+      tr.appendChild(td);
+      txList.appendChild(tr);
+    } else {
+      for (const t of slice) txList.appendChild(buildRow(t));
     }
+
+    if (paginationEl) {
+      paginationEl.innerHTML = '';
+      if (totalPages > 1) {
+        const nav = document.createElement('ul');
+        nav.className = 'pagination m-0';
+        for (let p = 1; p <= totalPages; p++) {
+          const li = document.createElement('li');
+          li.className = 'page-item' + (p === currentPage ? ' active' : '');
+          const a = document.createElement('a');
+          a.className = 'page-link';
+          a.href = '#';
+          a.textContent = String(p);
+          a.addEventListener('click', (e) => { e.preventDefault(); currentPage = p; renderPage(); });
+          li.appendChild(a);
+          nav.appendChild(li);
+        }
+        paginationEl.appendChild(nav);
+      }
+    }
+  }
+
+  function buildRow(t) {
+    const tr = document.createElement('tr');
+    tr.dataset.id = t.transaction_id;
+
+    const dateTd = document.createElement('td');
+    dateTd.textContent = t.transaction_date ? String(t.transaction_date).slice(0, 10) : '';
+    const catTd = document.createElement('td');
+    catTd.textContent = t.category_name || '';
+    const typeTd = document.createElement('td');
+    typeTd.textContent = t.transaction_type || '';
+    const notesTd = document.createElement('td');
+    notesTd.textContent = t.notes || '';
+    const amtTd = document.createElement('td');
+    amtTd.className = 'text-end';
+    amtTd.textContent = formatAmount(t.amount);
+    const actionsTd = document.createElement('td');
+
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'btn btn-sm btn-ghost-secondary me-1';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', () => activateEdit(tr, t));
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'btn btn-sm btn-ghost-danger';
+    delBtn.textContent = 'Delete';
+    delBtn.addEventListener('click', async () => {
+      if (!confirm('Delete this transaction?')) return;
+      try {
+        await api.delete(`/api/transactions/${t.transaction_id}`);
+        allTransactions = allTransactions.filter(x => x.transaction_id !== t.transaction_id);
+        renderPage();
+      } catch (err) {
+        alert(`Delete failed: ${err.message}`);
+      }
+    });
+
+    actionsTd.appendChild(editBtn);
+    actionsTd.appendChild(delBtn);
+    tr.appendChild(dateTd);
+    tr.appendChild(catTd);
+    tr.appendChild(typeTd);
+    tr.appendChild(notesTd);
+    tr.appendChild(amtTd);
+    tr.appendChild(actionsTd);
+    return tr;
+  }
+
+  function activateEdit(tr, t) {
+    const tds = tr.querySelectorAll('td');
+
+    const dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.className = 'form-control form-control-sm';
+    dateInput.value = t.transaction_date ? String(t.transaction_date).slice(0, 10) : '';
+    tds[0].innerHTML = '';
+    tds[0].appendChild(dateInput);
+
+    const catSelect = document.createElement('select');
+    catSelect.className = 'form-select form-select-sm';
+    for (const c of allCategories) {
+      const opt = document.createElement('option');
+      opt.value = String(c.category_id);
+      opt.textContent = c.category_name;
+      if (String(c.category_id) === String(t.category_id)) opt.selected = true;
+      catSelect.appendChild(opt);
+    }
+    tds[1].innerHTML = '';
+    tds[1].appendChild(catSelect);
+
+    const typeSelect = document.createElement('select');
+    typeSelect.className = 'form-select form-select-sm';
+    for (const v of ['expense', 'income']) {
+      const opt = document.createElement('option');
+      opt.value = v;
+      opt.textContent = v;
+      if (v === t.transaction_type) opt.selected = true;
+      typeSelect.appendChild(opt);
+    }
+    tds[2].innerHTML = '';
+    tds[2].appendChild(typeSelect);
+
+    const notesInput = document.createElement('input');
+    notesInput.type = 'text';
+    notesInput.className = 'form-control form-control-sm';
+    notesInput.value = t.notes || '';
+    notesInput.maxLength = 255;
+    tds[3].innerHTML = '';
+    tds[3].appendChild(notesInput);
+
+    const amtInput = document.createElement('input');
+    amtInput.type = 'number';
+    amtInput.className = 'form-control form-control-sm';
+    amtInput.step = '0.01';
+    amtInput.min = '0.01';
+    amtInput.value = t.amount;
+    tds[4].innerHTML = '';
+    tds[4].appendChild(amtInput);
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'btn btn-sm btn-primary me-1';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', async () => {
+      try {
+        const payload = {
+          amount: Number(amtInput.value),
+          date: dateInput.value,
+          type: typeSelect.value,
+          categoryId: Number(catSelect.value),
+          notes: notesInput.value || null,
+        };
+        const updated = await api.put(`/api/transactions/${t.transaction_id}`, payload);
+        const idx = allTransactions.findIndex(x => x.transaction_id === t.transaction_id);
+        if (idx >= 0) {
+          const cat = allCategories.find(c => String(c.category_id) === String(payload.categoryId));
+          allTransactions[idx] = {
+            ...allTransactions[idx],
+            amount: payload.amount,
+            transaction_date: payload.date,
+            transaction_type: payload.type,
+            category_id: payload.categoryId,
+            category_name: cat ? cat.category_name : allTransactions[idx].category_name,
+            notes: payload.notes,
+            ...(updated || {}),
+          };
+        }
+        renderPage();
+      } catch (err) {
+        alert(`Save failed: ${err.message}`);
+      }
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn btn-sm btn-ghost-secondary';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => renderPage());
+
+    tds[5].innerHTML = '';
+    tds[5].appendChild(saveBtn);
+    tds[5].appendChild(cancelBtn);
+  }
+
+  if (filterReset) {
+    filterReset.addEventListener('click', () => {
+      if (filterDateFrom) filterDateFrom.value = '';
+      if (filterDateTo) filterDateTo.value = '';
+      if (filterCategory) filterCategory.value = '';
+      if (filterType) filterType.value = '';
+      currentPage = 1;
+      renderPage();
+    });
+  }
+
+  [filterDateFrom, filterDateTo, filterCategory, filterType].forEach(el => {
+    if (el) el.addEventListener('change', () => { currentPage = 1; renderPage(); });
   });
+
+  if (txForm) {
+    const dateInput = txForm.querySelector('[name="date"]');
+    if (dateInput) dateInput.valueAsDate = new Date();
+
+    txForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      setStatus(status, 'Saving…');
+      const payload = {
+        amount: Number(txForm.amount.value),
+        date: txForm.date.value,
+        type: txForm.type.value,
+        categoryId: Number(txForm.categoryId.value),
+        notes: txForm.notes.value || null,
+      };
+      try {
+        const created = await api.post('/api/transactions', payload);
+        if (created) allTransactions.unshift(created);
+        renderPage();
+        setStatus(status, 'Transaction added.', 'success');
+        txForm.reset();
+        if (dateInput) dateInput.valueAsDate = new Date();
+      } catch (err) {
+        setStatus(status, err.message, 'error');
+      }
+    });
+  }
+
+  renderPage();
 }
 
 // --- Categories -------------------------------------------------------------
@@ -146,117 +517,73 @@ async function initCategories() {
   const status = document.getElementById('form-status');
 
   async function reload() {
-    list.innerHTML = '<li class="muted">Loading…</li>';
+    if (!list) return;
+    list.innerHTML = '';
     try {
       const categories = await api.get('/api/categories');
-      list.innerHTML = '';
-      if (categories.length === 0) {
-        list.innerHTML = '<li class="muted">No categories yet.</li>';
+      if (!categories || categories.length === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 3;
+        td.className = 'text-secondary';
+        td.textContent = 'No categories yet.';
+        tr.appendChild(td);
+        list.appendChild(tr);
         return;
       }
       for (const c of categories) {
-        const li = document.createElement('li');
-        const name = document.createElement('span');
-        name.textContent = c.CategoryName;
-        const type = document.createElement('span');
-        type.className = 'type-badge';
-        type.textContent = `(${c.CategoryType})`;
-        li.appendChild(name);
-        li.appendChild(type);
-        list.appendChild(li);
+        const tr = document.createElement('tr');
+        const nameTd = document.createElement('td');
+        nameTd.textContent = c.category_name;
+        const typeTd = document.createElement('td');
+        const badge = document.createElement('span');
+        badge.className = 'type-badge';
+        badge.textContent = c.category_type;
+        typeTd.appendChild(badge);
+        const actionsTd = document.createElement('td');
+        tr.appendChild(nameTd);
+        tr.appendChild(typeTd);
+        tr.appendChild(actionsTd);
+        list.appendChild(tr);
       }
     } catch (err) {
-      list.innerHTML = `<li class="muted">Failed to load: ${err.message}</li>`;
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 3;
+      td.textContent = `Failed to load: ${err.message}`;
+      tr.appendChild(td);
+      list.appendChild(tr);
     }
   }
 
   await reload();
 
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    setStatus(status, 'Adding…');
-
-    const payload = {
-      name: form.name.value,
-      type: form.type.value,
-    };
-
-    try {
-      await api.post('/api/categories', payload);
-      setStatus(status, 'Category added.', 'success');
-      form.reset();
-      await reload();
-    } catch (err) {
-      setStatus(status, err.message, 'error');
-    }
-  });
+  if (form) {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      setStatus(status, 'Adding…');
+      const payload = { name: form.name.value, type: form.type.value };
+      try {
+        await api.post('/api/categories', payload);
+        setStatus(status, 'Category added.', 'success');
+        form.reset();
+        await reload();
+      } catch (err) {
+        setStatus(status, err.message, 'error');
+      }
+    });
+  }
 }
+
+// --- Budgets ----------------------------------------------------------------
+
+function initBudgets() {}
 
 // --- Reports ----------------------------------------------------------------
 
-function initReports() {
-  const buttons = document.querySelectorAll('[data-report]');
-  const placeholder = document.getElementById('report-placeholder');
-  const table = document.getElementById('report-table');
-  const thead = table.querySelector('thead');
-  const tbody = table.querySelector('tbody');
+function initReports() {}
 
-  buttons.forEach((btn) => {
-    btn.addEventListener('click', () => loadReport(btn.dataset.report));
-  });
+// --- Profile ----------------------------------------------------------------
 
-  async function loadReport(kind) {
-    placeholder.textContent = 'Loading…';
-    placeholder.hidden = false;
-    table.hidden = true;
+function initProfile() {}
 
-    try {
-      const data = await api.get(`/api/reports/${kind}`);
-      renderReport(kind, data);
-    } catch (err) {
-      placeholder.textContent = `Failed to load: ${err.message}`;
-    }
-  }
-
-  function renderReport(kind, rows) {
-    if (!rows || rows.length === 0) {
-      placeholder.textContent = 'No data yet.';
-      placeholder.hidden = false;
-      table.hidden = true;
-      return;
-    }
-
-    placeholder.hidden = true;
-    table.hidden = false;
-    thead.innerHTML = '';
-    tbody.innerHTML = '';
-
-    const headers = kind === 'monthly'
-      ? ['Month', 'Type', 'Total']
-      : ['Category', 'Type', 'Total'];
-
-    const headerRow = document.createElement('tr');
-    headers.forEach((label, i) => {
-      const th = document.createElement('th');
-      th.textContent = label;
-      if (i === 2) th.className = 'amount';
-      headerRow.appendChild(th);
-    });
-    thead.appendChild(headerRow);
-
-    for (const r of rows) {
-      const tr = document.createElement('tr');
-      const cells = kind === 'monthly'
-        ? [r.Month, r.TransactionType, formatAmount(r.Total)]
-        : [r.CategoryName, r.CategoryType, formatAmount(r.Total)];
-
-      cells.forEach((value, i) => {
-        const td = document.createElement('td');
-        td.textContent = value;
-        if (i === 2) td.className = 'amount';
-        tr.appendChild(td);
-      });
-      tbody.appendChild(tr);
-    }
-  }
-}
