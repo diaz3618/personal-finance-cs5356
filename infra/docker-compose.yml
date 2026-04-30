@@ -1,6 +1,11 @@
+# Replace OWNER with your GitHub username (github.com/OWNER).
+# Images pull from GHCR when available; local build is the fallback.
+
 services:
   mysql:
-    image: mysql:8.0
+    image: ghcr.io/OWNER/pf-tracker-mysql:latest
+    build:
+      context: ../database
     command: --event_scheduler=ON
     restart: unless-stopped
     env_file: ../.env
@@ -20,16 +25,40 @@ services:
       retries: 30
       start_period: 120s
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   app:
-    build: ../app
+    image: ghcr.io/OWNER/pf-tracker-app:latest
+    build:
+      context: ../app
     restart: unless-stopped
     env_file: ../.env
     environment:
       DB_HOST: mysql
-    ports:
-      - "3010:3000"
+      REDIS_HOST: redis
     depends_on:
       mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ../app/public:/usr/share/nginx/html:ro
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      app:
         condition: service_healthy
 
 volumes:
