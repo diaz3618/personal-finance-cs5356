@@ -102,7 +102,10 @@ CREATE TABLE budget_alerts (
 
     CONSTRAINT fk_budget_alerts_category
         FOREIGN KEY (category_id) REFERENCES categories(id)
-        ON DELETE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT uq_budget_alerts_user_cat_month
+        UNIQUE (user_id, category_id, month)
 ) ENGINE=InnoDB;
 
 CREATE TABLE transaction_audit_log (
@@ -223,5 +226,163 @@ GRANT INSERT, UPDATE, DELETE ON personal_finance.v_user_transactions TO 'app_use
 GRANT INSERT, UPDATE, DELETE ON personal_finance.v_user_categories   TO 'app_user'@'%';
 -- v_user_budgets is a join/aggregate view (non-updatable); grant direct table access for writes
 GRANT INSERT, UPDATE, DELETE ON personal_finance.budgets             TO 'app_user'@'%';
+GRANT EXECUTE ON PROCEDURE personal_finance.* TO 'app_user'@'%';
 
 FLUSH PRIVILEGES;
+
+-- Phase 4: Stored procedures (PL/SQL — Lecture 6)
+DELIMITER //
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE usp_monthly_summary(
+    IN p_user_id INT,
+    IN p_year    INT,
+    IN p_month   INT
+)
+SQL SECURITY DEFINER
+BEGIN
+    DECLARE done       INT           DEFAULT 0;
+    DECLARE v_cat_id   INT;
+    DECLARE v_cat_name VARCHAR(100);
+    DECLARE v_cat_type ENUM('income', 'expense');
+    DECLARE v_total    DECIMAL(10,2) DEFAULT 0.00;
+
+    DECLARE cur CURSOR FOR
+        SELECT c.id, c.name, c.type, COALESCE(SUM(t.amount), 0.00)
+          FROM categories c
+          LEFT JOIN transactions t
+                 ON t.category_id = c.id
+                AND t.user_id     = p_user_id
+                AND YEAR(t.transaction_date)  = p_year
+                AND MONTH(t.transaction_date) = p_month
+         WHERE c.user_id = p_user_id
+         GROUP BY c.id, c.name, c.type;
+
+    DECLARE CONTINUE HANDLER FOR NOT FOUND    SET done = 1;
+    DECLARE CONTINUE HANDLER FOR SQLEXCEPTION BEGIN END;
+
+    DROP   TEMPORARY TABLE IF EXISTS tmp_monthly_summary;
+    CREATE TEMPORARY TABLE tmp_monthly_summary (
+        category_id   INT,
+        category_name VARCHAR(100),
+        category_type ENUM('income', 'expense'),
+        total         DECIMAL(10,2)
+    );
+
+    OPEN cur;
+    read_loop: LOOP
+        FETCH cur INTO v_cat_id, v_cat_name, v_cat_type, v_total;
+        IF done THEN LEAVE read_loop; END IF;
+        INSERT INTO tmp_monthly_summary VALUES (v_cat_id, v_cat_name, v_cat_type, v_total);
+    END LOOP;
+    CLOSE cur;
+
+    SELECT * FROM tmp_monthly_summary ORDER BY category_type, category_name;
+    DROP TEMPORARY TABLE IF EXISTS tmp_monthly_summary;
+END //
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE usp_apply_budget_alert(
+    IN p_user_id INT
+)
+SQL SECURITY DEFINER
+BEGIN
+    DECLARE done     INT           DEFAULT 0;
+    DECLARE err_flag INT           DEFAULT 0;
+    DECLARE v_cat_id INT;
+    DECLARE v_month  DATE;
+    DECLARE v_limit  DECIMAL(10,2);
+    DECLARE v_actual DECIMAL(10,2);
+
+    DECLARE cur CURSOR FOR
+        SELECT b.category_id,
+               b.month,
+               b.limit_amount,
+               COALESCE(SUM(t.amount), 0.00) AS actual_spend
+          FROM budgets b
+          LEFT JOIN transactions t
+                 ON t.category_id      = b.category_id
+                AND t.user_id          = b.user_id
+                AND t.transaction_type = 'expense'
+                AND DATE_FORMAT(t.transaction_date, '%Y-%m') = DATE_FORMAT(b.month, '%Y-%m')
+         WHERE b.user_id = p_user_id
+         GROUP BY b.category_id, b.month, b.limit_amount
+        HAVING actual_spend > b.limit_amount;
+
+    DECLARE CONTINUE HANDLER FOR NOT FOUND    SET done = 1;
+    DECLARE CONTINUE HANDLER FOR SQLEXCEPTION SET err_flag = 1;
+
+    START TRANSACTION;
+
+    OPEN cur;
+    alert_loop: LOOP
+        FETCH cur INTO v_cat_id, v_month, v_limit, v_actual;
+        IF done THEN LEAVE alert_loop; END IF;
+
+        SET err_flag = 0;
+        SAVEPOINT sp_budget_check;
+
+        INSERT IGNORE INTO budget_alerts
+            (user_id, category_id, month, actual_amount, limit_amount)
+        VALUES
+            (p_user_id, v_cat_id, v_month, v_actual, v_limit);
+
+        IF err_flag THEN
+            ROLLBACK TO SAVEPOINT sp_budget_check;
+            SET err_flag = 0;
+        END IF;
+    END LOOP;
+    CLOSE cur;
+
+    COMMIT;
+END //
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE usp_transfer_category(
+    IN p_transaction_id  INT,
+    IN p_new_category_id INT,
+    IN p_user_id         INT
+)
+SQL SECURITY DEFINER
+BEGIN
+    DECLARE v_tx_type  ENUM('income', 'expense');
+    DECLARE v_cat_type ENUM('income', 'expense');
+
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+
+    START TRANSACTION;
+
+    SELECT transaction_type INTO v_tx_type
+      FROM transactions
+     WHERE id = p_transaction_id AND user_id = p_user_id
+       FOR UPDATE;
+
+    IF v_tx_type IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Transaction not found or not owned by user';
+    END IF;
+
+    SELECT type INTO v_cat_type
+      FROM categories
+     WHERE id = p_new_category_id AND user_id = p_user_id;
+
+    IF v_cat_type IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Category not found or not owned by user';
+    END IF;
+
+    IF v_tx_type <> v_cat_type THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Category type does not match transaction type';
+    END IF;
+
+    UPDATE transactions
+       SET category_id = p_new_category_id
+     WHERE id = p_transaction_id AND user_id = p_user_id;
+
+    COMMIT;
+END //
+
+DELIMITER ;
+
