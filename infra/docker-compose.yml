@@ -1,6 +1,7 @@
 services:
   mysql:
     image: mysql:8.0
+    command: --event_scheduler=ON
     restart: unless-stopped
     env_file: ../.env
     environment:

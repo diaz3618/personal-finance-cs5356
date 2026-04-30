@@ -226,7 +226,9 @@ GRANT INSERT, UPDATE, DELETE ON personal_finance.v_user_transactions TO 'app_use
 GRANT INSERT, UPDATE, DELETE ON personal_finance.v_user_categories   TO 'app_user'@'%';
 -- v_user_budgets is a join/aggregate view (non-updatable); grant direct table access for writes
 GRANT INSERT, UPDATE, DELETE ON personal_finance.budgets             TO 'app_user'@'%';
-GRANT EXECUTE ON PROCEDURE personal_finance.* TO 'app_user'@'%';
+-- Schema-wide EXECUTE covers both stored procedures and functions in MySQL.
+-- The PROCEDURE/FUNCTION keyword on GRANT applies only to specific routine names.
+GRANT EXECUTE ON personal_finance.* TO 'app_user'@'%';
 
 FLUSH PRIVILEGES;
 
@@ -383,6 +385,113 @@ BEGIN
 
     COMMIT;
 END //
+
+DELIMITER ;
+
+-- Phase 4: Stored functions (Lecture 6)
+DELIMITER //
+
+CREATE DEFINER=`root`@`localhost` FUNCTION fn_net_balance(p_user_id INT)
+    RETURNS DECIMAL(10,2)
+    READS SQL DATA
+    SQL SECURITY DEFINER
+BEGIN
+    DECLARE v_income  DECIMAL(10,2) DEFAULT 0.00;
+    DECLARE v_expense DECIMAL(10,2) DEFAULT 0.00;
+
+    SELECT COALESCE(SUM(amount), 0.00) INTO v_income
+      FROM transactions
+     WHERE user_id = p_user_id AND transaction_type = 'income';
+
+    SELECT COALESCE(SUM(amount), 0.00) INTO v_expense
+      FROM transactions
+     WHERE user_id = p_user_id AND transaction_type = 'expense';
+
+    RETURN v_income - v_expense;
+END //
+
+CREATE DEFINER=`root`@`localhost` FUNCTION fn_days_in_period(
+    p_start_date DATE,
+    p_end_date   DATE
+)
+    RETURNS INT
+    DETERMINISTIC
+    NO SQL
+    SQL SECURITY DEFINER
+RETURN DATEDIFF(p_end_date, p_start_date) + 1 //
+
+DELIMITER ;
+
+-- Phase 4: Composite audit trigger (AFTER INSERT/UPDATE/DELETE on transactions — Lecture 6)
+-- MySQL requires one trigger per event type; all three write to transaction_audit_log.
+DELIMITER //
+
+CREATE TRIGGER trg_log_tx_changes_insert
+AFTER INSERT ON transactions
+FOR EACH ROW
+BEGIN
+    INSERT INTO transaction_audit_log
+        (transaction_id, action, old_amount, new_amount, changed_by)
+    VALUES
+        (NEW.id, 'INSERT', NULL, NEW.amount, NEW.user_id);
+END //
+
+CREATE TRIGGER trg_log_tx_changes_update
+AFTER UPDATE ON transactions
+FOR EACH ROW
+BEGIN
+    INSERT INTO transaction_audit_log
+        (transaction_id, action, old_amount, new_amount, changed_by)
+    VALUES
+        (NEW.id, 'UPDATE', OLD.amount, NEW.amount, NEW.user_id);
+END //
+
+CREATE TRIGGER trg_log_tx_changes_delete
+AFTER DELETE ON transactions
+FOR EACH ROW
+BEGIN
+    INSERT INTO transaction_audit_log
+        (transaction_id, action, old_amount, new_amount, changed_by)
+    VALUES
+        (OLD.id, 'DELETE', OLD.amount, NULL, OLD.user_id);
+END //
+
+DELIMITER ;
+
+-- Phase 4: Scheduled events (Event Scheduler — Lecture 6)
+-- event_scheduler=ON is enabled via docker-compose command flag (infra/docker-compose.yml).
+DELIMITER //
+
+CREATE EVENT IF NOT EXISTS evt_monthly_budget_snapshot
+ON SCHEDULE EVERY 1 MONTH
+    STARTS '2026-02-01 00:00:00'
+ON COMPLETION PRESERVE
+ENABLE
+DO
+BEGIN
+    DECLARE done  INT DEFAULT 0;
+    DECLARE v_uid INT;
+
+    DECLARE cur CURSOR FOR SELECT id FROM users;
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1;
+
+    OPEN cur;
+    user_loop: LOOP
+        FETCH cur INTO v_uid;
+        IF done THEN LEAVE user_loop; END IF;
+        CALL usp_apply_budget_alert(v_uid);
+    END LOOP;
+    CLOSE cur;
+END //
+
+CREATE EVENT IF NOT EXISTS evt_purge_old_alerts
+ON SCHEDULE EVERY 1 WEEK
+    STARTS CURRENT_TIMESTAMP
+ON COMPLETION PRESERVE
+ENABLE
+DO
+    DELETE FROM budget_alerts
+     WHERE triggered_at < DATE_SUB(NOW(), INTERVAL 12 MONTH) //
 
 DELIMITER ;
 
