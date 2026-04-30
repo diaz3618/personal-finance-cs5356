@@ -446,8 +446,11 @@ BEGIN
         (NEW.id, 'UPDATE', OLD.amount, NEW.amount, NEW.user_id);
 END //
 
+-- BEFORE DELETE so the parent row still exists when the audit row is inserted;
+-- the FK on transaction_audit_log.transaction_id (ON DELETE SET NULL) then nulls
+-- the just-inserted audit row's transaction_id once the actual DELETE completes.
 CREATE TRIGGER trg_log_tx_changes_delete
-AFTER DELETE ON transactions
+BEFORE DELETE ON transactions
 FOR EACH ROW
 BEGIN
     INSERT INTO transaction_audit_log
