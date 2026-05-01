@@ -29,8 +29,7 @@ That starts four services:
 
 Port 80 is the public entry point. Port 3306 is bound to localhost for direct
 database access during development. The current project docs live in
-`../docs/`, including the deployment and auth/RLS diagrams under
-`../docs/diagrams/`.
+`../docs/`.
 
 To expose port 80 through a public tunnel for Clerk webhook delivery:
 

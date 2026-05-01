@@ -107,4 +107,4 @@ close to the schema for two reasons:
 
 - [System Overview](./system-overview.md)
 - [Data Model](./data-model.md)
-- [Diagrams](./diagrams/)
+- [Technology Choices](./technology-choices.md)

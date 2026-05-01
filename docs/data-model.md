@@ -136,4 +136,4 @@ duplication into an enforced rule instead of an application convention.
 
 - [System Overview](./system-overview.md)
 - [Database Workflows](./database-workflows.md)
-- [Diagrams](./diagrams/)
+- [Technology Choices](./technology-choices.md)

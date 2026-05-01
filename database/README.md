@@ -19,7 +19,7 @@ database/
     ├── system-overview.md
     ├── data-model.md
     ├── database-workflows.md
-    └── diagrams/
+    └── technology-choices.md
 ```
 
 The Dockerfile copies `init/` into MySQL's `docker-entrypoint-initdb.d/`, so
@@ -55,7 +55,7 @@ The project-facing writeups live in `../docs/`:
 - [`docs/system-overview.md`](../docs/system-overview.md)
 - [`docs/data-model.md`](../docs/data-model.md)
 - [`docs/database-workflows.md`](../docs/database-workflows.md)
-- [`docs/diagrams/`](../docs/diagrams/)
+- [`docs/technology-choices.md`](../docs/technology-choices.md)
 
 ## Reporting queries
 

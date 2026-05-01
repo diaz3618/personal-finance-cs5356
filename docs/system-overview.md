@@ -75,4 +75,4 @@ Both targets keep the same four-service shape: `nginx`, `app`, `mysql`, and
 
 - [Data Model](./data-model.md)
 - [Database Workflows](./database-workflows.md)
-- [Diagrams](./diagrams/)
+- [Technology Choices](./technology-choices.md)

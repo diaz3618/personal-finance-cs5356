@@ -17,7 +17,7 @@ authentication
 
 ### Environment
 
-Use the project root `.env` file, not an app-local one:
+Use the project root `.env` file:
 
 ```bash
 cp .env.example .env
