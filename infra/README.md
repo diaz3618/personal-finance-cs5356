@@ -15,7 +15,7 @@ cp ../.env.example ../.env
 Run from `infra/`:
 
 ```sh
-docker compose up --build
+docker compose up -f infra/docker-compose.yml --build
 ```
 
 That starts four services:
@@ -34,7 +34,8 @@ database access during development. The current project docs live in
 To expose port 80 through a public tunnel for Clerk webhook delivery:
 
 ```sh
-docker compose -f docker-compose.yml -f docker-compose.ngrok.yml up -d
+cd infra
+docker compose --env-file ../.env -f docker-compose.yml -f docker-compose.ngrok.yml up -d
 ```
 
 That overlay needs `NGROK_AUTHTOKEN` in `.env`
